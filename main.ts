@@ -897,7 +897,7 @@ async function createApp(config: {
 
   app.get("/register", (c) => {
     const repo = c.req.query("repo") || "";
-    const pubkey = c.req.query("pubkey") || "";
+    const pubkey = c.req.query("pubkey") || getSshKey(c) || "";
     const perm = c.req.query("perm") || "RW";
     const keyName = c.req.query("key_name") || "nanobot";
     const result = c.req.query("_result");
