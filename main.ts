@@ -797,8 +797,8 @@ async function createApp(config: {
       return c.json({ error: "Not authenticated" }, 401);
     }
     // Preserve original URL through login flow via ?next=
-    const qs = c.req.queryString();
-    const returnTo = encodeURIComponent(qs ? path + "?" + qs : path);
+    const qs = new URL(c.req.url).search;
+    const returnTo = encodeURIComponent(qs ? path + qs : path);
     return c.redirect("/login?next=" + returnTo);
   });
 
