@@ -234,11 +234,11 @@ class GitHubClient {
     return (await this.#req<{ rate: { remaining: number; limit: number; reset: number } }>("/rate_limit")).rate;
   }
 
-  async exchangeCode(code: string, verifier: string, clientId: string, redirectUri: string): Promise<string> {
+  async exchangeCode(code: string, verifier: string, clientId: string, clientSecret: string, redirectUri: string): Promise<string> {
     const res = await fetch("https://github.com/login/oauth/access_token", {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId, code, code_verifier: verifier, redirect_uri: redirectUri }),
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, code_verifier: verifier, redirect_uri: redirectUri }),
     });
     const data = await res.json();
     if (data.error) throw new Error(`OAuth error: ${data.error_description ?? data.error}`);
@@ -748,11 +748,12 @@ Deno.test("TokenExpiredError is instance of Error", () => {
 
 async function createApp(config: {
   clientId: string;
+  clientSecret: string;
   callbackUrl: string;
   key: CryptoKeyRef;
   ghToken?: string;
 }) {
-  const { clientId, callbackUrl, key: encryptionKey, ghToken } = config;
+  const { clientId, clientSecret, callbackUrl, key: encryptionKey, ghToken } = config;
   const AUTH_COOKIE = "gh_token";
   const SSH_COOKIE = "ssh_key";
 
@@ -861,7 +862,7 @@ async function createApp(config: {
       if (!payload.v) throw new Error("Invalid state payload");
       const redirectUri = payload.r || callbackUrl;
       const tempClient = new GitHubClient("");
-      const accessToken = await tempClient.exchangeCode(code, payload.v, clientId, redirectUri);
+      const accessToken = await tempClient.exchangeCode(code, payload.v, clientId, clientSecret, redirectUri);
       const encrypted = await encryptWith(encryptionKey, accessToken);
       c.header("Set-Cookie", cookieSet(AUTH_COOKIE, encodeURIComponent(encrypted), { maxAge: 86400 * 30, sameSite: "Lax" }));
       return c.redirect(payload.n || "/");
@@ -1039,7 +1040,8 @@ if (import.meta.main && (Deno.args.includes("--serve") || IS_DENO_DEPLOY)) {
     return `http://localhost:${port}/callback`;
   })();
 
-  const app = await createApp({ clientId, callbackUrl: resolvedCallbackUrl, key: encryptionKey, ghToken });
+  const clientSecret = Deno.env.get("GITHUB_CLIENT_SECRET") || "";
+  const app = await createApp({ clientId, clientSecret, callbackUrl: resolvedCallbackUrl, key: encryptionKey, ghToken });
 
   console.log(`\n🚀 Dashboard → http://localhost:${port}\n`);
   Deno.serve({ port }, app.fetch);
