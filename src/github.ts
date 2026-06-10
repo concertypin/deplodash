@@ -52,10 +52,10 @@ export class GitHubClient {
     return this.#req<DeployKey[]>(`/repos/${owner}/${repo}/keys?per_page=100`);
   }
 
-  addDeployKey(owner: string, repo: string, title: string, key: string, readOnly: boolean): Promise<DeployKey> {
+  addDeployKey(owner: string, repo: string, title: string, key: string, writable: boolean): Promise<DeployKey> {
     return this.#req<DeployKey>(`/repos/${owner}/${repo}/keys`, {
       method: "POST",
-      body: JSON.stringify({ title, key, read_only: readOnly }),
+      body: JSON.stringify({ title, key, read_only: !writable }),
     });
   }
 
