@@ -1,5 +1,5 @@
 import { TokenExpiredError } from "./errors.ts";
-import type { Repo, DeployKey } from "./types.ts";
+import type { Repo, DeployKey, GitHubUser } from "./types.ts";
 
 // ─── GitHub API Client ──────────────────────────────────────────────────────
 
@@ -46,6 +46,12 @@ export class GitHubClient {
       if (batch.length < 100) break;
     }
     return all;
+  }
+
+
+  /** Get the authenticated user. */
+  async getUser(): Promise<GitHubUser> {
+    return this.#req<GitHubUser>("/user");
   }
 
   listDeployKeys(owner: string, repo: string): Promise<DeployKey[]> {

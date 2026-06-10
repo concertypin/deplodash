@@ -1,9 +1,12 @@
 {
   "tasks": {
     "dev": "deno run --watch -A main.ts",
-    "start": "deno run -A main.ts"
+    "start": "deno run -A main.ts",
+    "test": "deno test -A --unstable-kv main.ts",
+    "check": "deno check main.ts"
   },
   "imports": {
-    "hono": "npm:hono@^4"
+    "hono": "npm:hono@^4",
+    "jose": "npm:jose@^5"
   }
 }

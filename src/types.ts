@@ -10,6 +10,8 @@ export type Repo = {
   readonly description: string | null;
 };
 
+export type GitHubUser = { id: number; login: string; avatar_url: string; name: string | null };
+
 export type DeployKey = { readonly id: number; readonly key: string; readonly title: string; readonly read_only: boolean; readonly verified: boolean };
 
 export type RepoStatus = { repo: Repo; keyId: number | null; hasAdmin: boolean };

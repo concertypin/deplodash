@@ -32,8 +32,13 @@ export * from "./src/helpers.ts";
 export * from "./src/crypto.ts";
 export * from "./src/github.ts";
 export * from "./src/html.ts";
+export * from "./src/github-app.ts";
+export * from "./src/agent-auth.ts";
+export * from "./src/token-service.ts";
+export * from "./src/consent-ui.ts";
+export * from "./src/llms.ts";
 
-import { Hono, type Context } from "npm:hono";
+import { Hono, type Context, type MiddlewareHandler } from "npm:hono";
 import { logger } from "npm:hono/logger";
 import { parseArgs } from "jsr:@std/cli";
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
@@ -50,6 +55,21 @@ import {
   renderRegisterPage,
   renderDashboard,
 } from "./src/html.ts";
+import { GitHubApp } from "./src/github-app.ts";
+import { agentAuthMiddleware } from "./src/agent-auth.ts";
+import { TokenService } from "./src/token-service.ts";
+import { renderConsentPage } from "./src/consent-ui.ts";
+import { renderLLMsTxt } from "./src/llms.ts";
+import {
+  permissionsFromScopes,
+  hashScopes,
+} from "./src/github-app.ts";
+import {
+  verifyAgentToken,
+  registerAgentToken,
+  revokeAgentToken,
+  listAgentTokens,
+} from "./src/agent-auth.ts";
 
 // ─── App Logic ───────────────────────────────────────────────────────────────
 
@@ -114,6 +134,8 @@ async function createApp(config: {
     gh_token: string;
     ssh_key: string;
     client: GitHubClient;
+    agent: import("./src/agent-auth.ts").AgentToken;
+    tokenService: import("./src/token-service.ts").TokenService;
   };
   const app = new Hono<{ Variables: Variables }>();
   app.use("*", logger());
@@ -319,6 +341,110 @@ async function createApp(config: {
       return c.json({ error: msg }, 400);
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // v2 — GitHub App Token Routes (optional, requires env setup)
+  // ═══════════════════════════════════════════════════════════════
+
+  let kv: Deno.Kv | null = null;
+  let tokenService: TokenService | null = null;
+
+  // Lazy-init KV + TokenService
+  async function getTokenService(baseUrl: string): Promise<TokenService | null> {
+    if (tokenService) return tokenService;
+    if (!GitHubApp.isConfigured()) return null;
+    try {
+      kv ??= await Deno.openKv();
+      const ghApp = GitHubApp.fromEnv();
+      tokenService = new TokenService(kv, ghApp, baseUrl);
+      return tokenService;
+    } catch (err) {
+      console.error("v2 init failed:", err);
+      return null;
+    }
+  }
+
+  // Guard middleware: enable v2 routes only when GitHub App is configured
+  async function v2Guard(c: Context, next: () => Promise<void>) {
+    const svc = await getTokenService(c.req.url.replace(/\/[^/]*$/, ""));
+    if (!svc) {
+      return c.json({ error: "v2_not_configured", message: "GitHub App not configured" }, 501);
+    }
+    c.set("tokenService", svc);
+    await next();
+  }
+
+  // /llms.txt — always available, no auth
+  app.get("/llms.txt", (c) => renderLLMsTxt());
+
+  // Build agent auth middleware with a lazy KV getter (kv is lazy-initialized)
+  function lazyAgentAuth(): MiddlewareHandler {
+    return async (c, next) => {
+      if (!kv) {
+        return c.json({ error: "v2_not_initialized", message: "Token service not ready" }, 503);
+      }
+      const authMw = agentAuthMiddleware(kv);
+      return authMw(c, next);
+    };
+  }
+
+  // POST /api/token — agent requests a GitHub token
+  // v2Guard runs first to ensure KV is initialized, then agent auth.
+  app.post("/api/token", v2Guard, lazyAgentAuth(), async (c) => {
+    const svc: TokenService = c.get("tokenService");
+    const agent = c.get("agent") as { agent_id: string };
+    const body = await c.req.json();
+    const { repo, scopes } = body as { repo: string; scopes: string[] };
+
+    if (!repo || !scopes || !Array.isArray(scopes) || scopes.length === 0) {
+      return c.json({ error: "Missing repo or scopes" }, 400);
+    }
+
+    const userId = parseInt(agent.agent_id, 10);
+    const result = await svc.requestToken({ repo, scopes }, isNaN(userId) ? undefined : userId);
+    return c.json(result);
+  });
+
+  // GET /auth/consent — user-facing consent page
+  app.get("/auth/consent", authGuard, v2Guard, async (c) => {
+    const repo = c.req.query("repo") || "";
+    const scopes = c.req.query("scopes") || "";
+    const redirectToken = c.req.query("token") || "";
+    if (!repo || !scopes) {
+      return c.html(renderConsentPage({ repo: "", scopes: "", redirectToken: "", error: "Missing repo or scopes" }));
+    }
+    return c.html(renderConsentPage({ repo, scopes, redirectToken }));
+  });
+
+  // POST /auth/consent — user approves consent
+  app.post("/auth/consent", authGuard, v2Guard, async (c) => {
+    const svc: TokenService = c.get("tokenService");
+    const body = await c.req.parseBody();
+    const { repo, scopes } = body as { repo: string; scopes: string };
+
+    if (!repo || !scopes) {
+      return c.html(renderConsentPage({ repo: "", scopes: "", redirectToken: "", error: "Missing repo or scopes" }));
+    }
+
+    const ghToken = c.get("gh_token");
+    if (!ghToken) return c.redirect("/auth/github?next=/auth/consent?" + new URLSearchParams({ repo, scopes }));
+
+    const client: GitHubClient = c.get("client");
+    try {
+      const user = await client.getUser();
+      const userId = user.id;
+      const scopeList = scopes.split(",");
+      const result = await svc.confirmAndIssue(userId, repo, scopeList);
+      if (result.status === "ok") {
+        return c.html(renderConsentPage({ repo, scopes, redirectToken: "", success: true }));
+      }
+      return c.html(renderConsentPage({ repo, scopes, redirectToken: "", error: "Failed to issue token" }));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.html(renderConsentPage({ repo, scopes, redirectToken: "", error: msg }));
+    }
+  });
+
   return app;
 }
 
@@ -427,6 +553,95 @@ const TEST_RUNNERS = [
     assertEquals(e.name, "TokenExpiredError");
     assertEquals(e instanceof Error, true);
     assertEquals(e.message, "test");
+  }),
+  // ─── v2: github-app.ts ───────────────────────────────────────
+  () => Deno.test("permissionsFromScopes maps individual scopes", () => {
+    const perms = permissionsFromScopes(["contents:write"]);
+    assertEquals(perms.contents, "write");
+    assertEquals(perms.metadata, "read");
+  }),
+  () => Deno.test("permissionsFromScopes maps preset combos", () => {
+    const wf = permissionsFromScopes(["contents:write", "workflows:write"]);
+    assertEquals(wf.workflows, "write");
+    assertEquals(wf.contents, "write");
+    assertEquals(wf.metadata, "read");
+  }),
+  () => Deno.test("permissionsFromScopes handles admin", () => {
+    const a = permissionsFromScopes(["admin"]);
+    assertEquals(a.administration, "write");
+    assertEquals(a.contents, "write");
+    assertEquals(a.workflows, "write");
+  }),
+  () => Deno.test("hashScopes produces deterministic key", () => {
+    assertEquals(hashScopes(["b", "a"]), hashScopes(["a", "b"]));
+    assertEquals(hashScopes(["contents:write"]), "contents:write");
+  }),
+  // ─── v2: agent-auth.ts ────────────────────────────────────────
+  () => Deno.test("verifyAgentToken returns null for unknown token", async () => {
+    const kv = await Deno.openKv(":memory:");
+    try {
+      const result = await verifyAgentToken(kv, "nonexistent");
+      assertEquals(result, null);
+    } finally {
+      kv.close();
+    }
+  }),
+  () => Deno.test("registerAgentToken stores and verifyAgentToken retrieves", async () => {
+    const kv = await Deno.openKv(":memory:");
+    try {
+      await registerAgentToken(kv, "test-token-123", "agent-1", "test agent");
+      const result = await verifyAgentToken(kv, "test-token-123");
+      assertEquals(result?.agent_id, "agent-1");
+      assertEquals(result?.label, "test agent");
+    } finally {
+      kv.close();
+    }
+  }),
+  () => Deno.test("revokeAgentToken removes token", async () => {
+    const kv = await Deno.openKv(":memory:");
+    try {
+      await registerAgentToken(kv, "tok", "agent-1");
+      await revokeAgentToken(kv, "tok");
+      assertEquals(await verifyAgentToken(kv, "tok"), null);
+    } finally {
+      kv.close();
+    }
+  }),
+  () => Deno.test("listAgentTokens returns all registered tokens", async () => {
+    const kv = await Deno.openKv(":memory:");
+    try {
+      await registerAgentToken(kv, "t1", "a1");
+      await registerAgentToken(kv, "t2", "a2");
+      const list = await listAgentTokens(kv);
+      assertEquals(list.length, 2);
+    } finally {
+      kv.close();
+    }
+  }),
+  // ─── v2: token-service.ts ─────────────────────────────────────
+  () => Deno.test("TokenService consent flow", async () => {
+    const kv = await Deno.openKv(":memory:");
+    try {
+      const consentKey = [...["user_consent"], 12345, "owner/repo", "contents:write"];
+      const entry = await kv.get(consentKey);
+      assertEquals(entry.value, null);
+
+      // Record consent
+      await kv.set(consentKey, { granted_at: new Date() });
+      const after = await kv.get<{ granted_at: Date }>(consentKey);
+      assertEquals(after.value !== null, true);
+
+      // Token cache
+      const cacheKey = [...["gh_token"], "owner/repo", "contents:write"];
+      const cached = await kv.get(cacheKey);
+      assertEquals(cached.value, null);
+
+      await kv.set(cacheKey, { token: "test-token", expires_at: new Date(Date.now() + 3600_000) });
+      const cachedAfter = await kv.get<{ token: string; expires_at: Date }>(cacheKey);
+      assertEquals(cachedAfter.value?.token, "test-token");
+    } finally {
+      kv.close();
+    }
   }),
 ];
 
