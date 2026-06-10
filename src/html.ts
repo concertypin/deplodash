@@ -111,7 +111,7 @@ export function renderRegisterPage(params: {
           <div>
             <label class="label"><span class="label-text">SSH Public Key</span></label>
             <textarea id="register-pubkey" name="pubkey" class="textarea textarea-bordered font-mono text-sm w-full h-28" placeholder="ssh-ed25519 ..." required>${escapeHtml(pubkey)}</textarea>
-            <label class="label"><span class="label-text-alt">${pubkey ? "✓ Key loaded from cookie" : "Paste your SSH public key"}</span></label>
+            <label class="label"><span class="label-text-alt" id="pubkey-status">${pubkey ? "✓ Key loaded" : "Paste your SSH public key"}</span></label>
           </div>
           <div>
             <label class="label"><span class="label-text">Permission</span></label>
