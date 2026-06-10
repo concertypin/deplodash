@@ -6,19 +6,17 @@ export const KEY_ID = "k1";
 export type CryptoKeyRef = CryptoKey;
 
 export async function initKey(secret?: string): Promise<CryptoKeyRef> {
-  if (secret) {
-    const salt = new TextEncoder().encode("deploy-key-dashboard-v1");
-    const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveBits", "deriveKey"]);
-    return await crypto.subtle.deriveKey(
-      { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-      keyMaterial,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"],
-    );
+  if (!secret) {
+    throw new TypeError("SECRET environment variable is required — set it or pass --secret");
   }
-  return await crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"],
+  const salt = new TextEncoder().encode("deploy-key-dashboard-v1");
+  const keyMaterial = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "PBKDF2", false, ["deriveBits", "deriveKey"]);
+  return await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
   );
 }
 

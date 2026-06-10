@@ -128,11 +128,17 @@ async function createApp(config: {
       const plain = await decryptWith(encryptionKey, packet);
       if (plain) c.set("gh_token", plain);
     }
-    // Parse & decrypt SSH key cookie
+    // Parse & decrypt SSH key cookie — fail on corrupted cookies
     const sshPacket = raw[SSH_COOKIE];
     if (sshPacket) {
       const plain = await decryptWith(encryptionKey, sshPacket);
-      if (plain) c.set(SSH_COOKIE, plain);
+      if (!plain) {
+        return c.text(
+          "저장된 SSH 키 쿠키를 복호화할 수 없습니다. /setup에서 키를 다시 등록하거나 쿠키를 삭제해주세요.",
+          400,
+        );
+      }
+      c.set(SSH_COOKIE, plain);
     }
     await next();
   });
