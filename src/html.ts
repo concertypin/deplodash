@@ -110,7 +110,7 @@ export function renderRegisterPage(params: {
           </div>
           <div>
             <label class="label"><span class="label-text">SSH Public Key</span></label>
-            <textarea name="pubkey" class="textarea textarea-bordered font-mono text-sm w-full h-28" placeholder="ssh-ed25519 ..." required>${escapeHtml(pubkey)}</textarea>
+            <textarea id="register-pubkey" name="pubkey" class="textarea textarea-bordered font-mono text-sm w-full h-28" placeholder="ssh-ed25519 ..." required>${escapeHtml(pubkey)}</textarea>
             <label class="label"><span class="label-text-alt">${pubkey ? "✓ Key loaded from cookie" : "Paste your SSH public key"}</span></label>
           </div>
           <div>
@@ -125,13 +125,16 @@ export function renderRegisterPage(params: {
             <input name="key_name" value="${escapeHtml(keyName)}" class="input input-bordered w-full" placeholder="nanobot">
           </div>
           <div class="card-actions justify-end">
-            <button type="submit" class="btn btn-primary">Register Key</button>
+            <button id="register-submit" type="submit" class="btn btn-primary">Register Key</button>
           </div>
         </form>
       </div>
     </div>
   </div>
 </div>
+<script>
+(function(){var b=document.getElementById("register-submit"),k=document.getElementById("register-pubkey");function u(){b.disabled=!k.value.trim()}k.addEventListener("input",u);u()})()
+</script>
 </body>
 </html>`;
 }
