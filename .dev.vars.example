@@ -1,0 +1,18 @@
+# ─── Deplodash Local Development Variables ─────────────────────────────────────
+# Copy this to .dev.vars and fill in your values.
+# For production, set these via `wrangler secret put` or the Cloudflare dashboard.
+
+# GitHub OAuth App credentials (required)
+# Create an OAuth App: GitHub > Settings > Developer settings > OAuth Apps > New OAuth App
+# Authorization callback URL → http://localhost:5178/callback (for local dev)
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# OAuth callback URL (required — must match GitHub OAuth App setting)
+CALLBACK_URL=http://localhost:5178/callback
+
+# Encryption key for session/SSH-key cookies (required — any string of your choice)
+ENCRYPTION_SECRET=
+
+# Direct GitHub PAT (optional — skips OAuth, read-only mode for dev/testing)
+# GITHUB_TOKEN=
