@@ -23,5 +23,8 @@ export function parsePerm(s: string): boolean {
 }
 
 export function isSafeRedirect(url: string): boolean {
-    return url.startsWith("/") && !url.startsWith("//");
+    return (
+        url.startsWith("/") &&
+        (url.length === 1 || (url[1] !== "/" && url[1] !== "\\"))
+    );
 }

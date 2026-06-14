@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeKey, escapeHtml, parseRepo, parsePerm } from "@/helpers";
+import {
+    normalizeKey,
+    escapeHtml,
+    parseRepo,
+    parsePerm,
+    isSafeRedirect,
+} from "@/helpers";
 
 describe("normalizeKey", () => {
     it("strips extra fields beyond algorithm + key", () => {
@@ -85,5 +91,25 @@ describe("parsePerm", () => {
 
     it("returns true for other values", () => {
         expect(parsePerm("something")).toBe(true);
+    });
+});
+
+describe("isSafeRedirect", () => {
+    it("accepts root path", () => {
+        expect(isSafeRedirect("/")).toBe(true);
+    });
+
+    it("accepts normal paths", () => {
+        expect(isSafeRedirect("/setup")).toBe(true);
+        expect(isSafeRedirect("/auth/github")).toBe(true);
+    });
+
+    it("rejects protocol-relative URLs", () => {
+        expect(isSafeRedirect("//evil.com")).toBe(false);
+    });
+
+    it("rejects backslash-normalized protocol-relative URLs", () => {
+        // /\/evil.com is normalized by browsers to //evil.com
+        expect(isSafeRedirect("/\\/evil.com")).toBe(false);
     });
 });

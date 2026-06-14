@@ -140,7 +140,7 @@ apiRouter.post(
             return c.json({ ok: true });
         } catch (err: unknown) {
             if (err instanceof TokenExpiredError) {
-                return c.redirect("/auth/github");
+                return c.json({ error: "token_expired" }, 401);
             }
             const msg = err instanceof Error ? err.message : String(err);
             return c.json({ error: msg }, 400);
@@ -181,7 +181,7 @@ apiRouter.post(
             return c.json({ full_name: repo.full_name });
         } catch (err: unknown) {
             if (err instanceof TokenExpiredError) {
-                return c.redirect("/auth/github");
+                return c.json({ error: "token_expired" }, 401);
             }
             const msg = err instanceof Error ? err.message : String(err);
             return c.json({ error: msg }, 400);

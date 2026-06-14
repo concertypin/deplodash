@@ -22,11 +22,12 @@ oauthRouter.get("/callback", async (c) => {
 
     const plain = await decryptWith(key, state);
     if (!plain) return c.text("Invalid state", 400);
-    const payload = JSON.parse(plain) as {
-        v?: string;
-        n?: string;
-        r?: string;
-    };
+    let payload: { v?: string; n?: string; r?: string };
+    try {
+        payload = JSON.parse(plain) as { v?: string; n?: string; r?: string };
+    } catch {
+        return c.text("Invalid state payload", 400);
+    }
     if (!payload.v) return c.text("Invalid state payload", 400);
 
     const redirectUri = payload.r || c.env.CALLBACK_URL;

@@ -38,6 +38,7 @@ async function loadRepoStatuses(
                         hasAdmin: true,
                     };
                 } catch (err) {
+                    if (err instanceof TokenExpiredError) throw err;
                     console.error(
                         `Failed to check deploy keys for ${repo.full_name}:`,
                         err
