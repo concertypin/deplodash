@@ -1,0 +1,61 @@
+{
+    "name": "deplodash",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "license": "Apache-2.0",
+    "author": {
+        "name": "concertypin",
+        "url": "https://github.com/concertypin"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/concertypin/deplodash"
+    },
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "dev": "vite dev",
+        "build": "vite build",
+        "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+        "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
+        "lint": "pnpm run lint:oxlint --fix",
+        "lint:check": "pnpm run lint:oxlint",
+        "lint:oxlint": "oxlint -c oxlint.config.ts . --type-aware --type-check --report-unused-disable-directives-severity=error",
+        "postinstall": "pnpm run cf-typegen && simple-git-hooks",
+        "check": "pnpm run format && pnpm run lint && pnpm run test && git add -u",
+        "pre-commit": "pnpm run check",
+        "test": "vitest run",
+        "deploy": "pnpm run build && wrangler deploy"
+    },
+    "engines": {
+        "node": ">=22.13.0"
+    },
+    "dependencies": {
+        "@scalar/hono-api-reference": "^0.10.14",
+        "hono": "^4.12.18",
+        "hono-openapi": "^1.3.0",
+        "zod": "^4.4.3"
+    },
+    "devDependencies": {
+        "@cloudflare/vite-plugin": "^1.36.3",
+        "@cloudflare/vitest-pool-workers": "^0.16.3",
+        "@types/node": "^25.6.2",
+        "@vitest/coverage-istanbul": "^4.1.5",
+        "cross-env": "^10.1.0",
+        "globals": "^17.6.0",
+        "oxlint": "^1.63.0",
+        "oxlint-tsgolint": "^0.22.1",
+        "prettier": "^3.8.3",
+        "simple-git-hooks": "^2.13.1",
+        "typescript": "~6.0.3",
+        "vite": "^8.0.11",
+        "vitest": "^4.1.5",
+        "wrangler": "^4.90.0"
+    },
+    "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a"
+}
