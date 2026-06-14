@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import app from "@/index";
 import type { HonoEnv } from "@/types";
+import { mockKVNamespace } from "../helpers";
+
+const openApiSchema = z.object({
+    info: z.object({ title: z.string(), version: z.string() }),
+    paths: z.unknown(),
+});
 
 const MIN_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: "test-secret-1234567890123456",
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
+    KV: mockKVNamespace(),
 };
 
 describe("index.ts - app configuration", () => {
@@ -32,10 +40,7 @@ describe("index.ts - app configuration", () => {
     it("serves OpenAPI spec at /openapi.json", async () => {
         const resp = await app.request("/openapi.json", {}, MIN_ENV);
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as {
-            info: { title: string; version: string };
-            paths: unknown;
-        };
+        const body = openApiSchema.parse(await resp.json());
         expect(body.info.title).toBe("Deplodash API");
         expect(body.info.version).toBe("1.0.0");
         expect(body.paths).toBeDefined();

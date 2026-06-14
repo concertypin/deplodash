@@ -3,6 +3,7 @@ import { router } from "@/route";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { resetKeyCache } from "@/crypto";
+import { mockKVNamespace } from "../helpers";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -12,6 +13,7 @@ const MIN_ENV: HonoEnv["Bindings"] = {
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
+    KV: mockKVNamespace(),
 };
 
 function createApp() {

@@ -3,6 +3,6 @@
         "tsBuildInfoFile": "./node_modules/.cache/app.tsbuildinfo",
         "lib": ["ESNext", "DOM", "DOM.Iterable"]
     },
-    "include": ["src"],
+    "include": ["src", "worker-configuration.d.ts"],
     "extends": "./tsconfig.base.json"
 }
