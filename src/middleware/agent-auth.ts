@@ -9,13 +9,21 @@
 
 import type { MiddlewareHandler } from "hono";
 import type { HonoEnv, AgentInfo } from "@/types";
+import { z } from "zod";
 
 /** KV key prefix for agent tokens. */
 const AGENT_PREFIX = "agent_tokens:";
 
+/** Runtime schema for AgentInfo stored in KV. */
+const agentInfoSchema = z.object({
+    agent_id: z.string(),
+    label: z.string(),
+    created_at: z.string(),
+});
+
 /**
  * Verify a bearer token against Cloudflare KV.
- * Returns the agent info or null if invalid.
+ * Returns the agent info or null if invalid / malformed.
  */
 export async function verifyAgentToken(
     kv: KVNamespace,
@@ -23,7 +31,10 @@ export async function verifyAgentToken(
 ): Promise<AgentInfo | null> {
     const key = `${AGENT_PREFIX}${token}`;
     const value = await kv.get(key, "json");
-    return value as AgentInfo | null;
+    if (!value) return null;
+    const parsed = agentInfoSchema.safeParse(value);
+    if (!parsed.success) return null;
+    return parsed.data;
 }
 
 /**
@@ -57,7 +68,9 @@ export async function revokeAgentToken(
 
 /**
  * List all registered agent tokens by scanning KV.
+ *
  * Note: KV list is eventually consistent and may be expensive for large datasets.
+ * TODO: Handle cursor-based pagination — kv.list() returns at most 1000 keys.
  */
 export async function listAgentTokens(
     kv: KVNamespace
@@ -68,7 +81,10 @@ export async function listAgentTokens(
         const token = entry.name.slice(AGENT_PREFIX.length);
         const value = await kv.get(entry.name, "json");
         if (value) {
-            result.push({ token, info: value as AgentInfo });
+            const parsed = agentInfoSchema.safeParse(value);
+            if (parsed.success) {
+                result.push({ token, info: parsed.data });
+            }
         }
     }
     return result;

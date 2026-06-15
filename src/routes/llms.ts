@@ -94,11 +94,7 @@ If you encounter permission errors, the agent will receive a \`needs_consent\` r
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at / — paths are relative
 
-export const llmsRouter = new Hono<HonoEnv>();
-
-// ── GET /llms.txt — Agent documentation ──────────────────────────────
-
-llmsRouter.get("/llms.txt", (c) => {
+export const llmsRouter = new Hono<HonoEnv>().get("/llms.txt", (c) => {
     return c.text(LLMS_CONTENT, 200, {
         "Content-Type": "text/plain; charset=utf-8",
     });

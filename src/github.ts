@@ -1,5 +1,11 @@
 import { TokenExpiredError } from "@/errors";
 import type { Repo, DeployKey } from "@/types";
+import * as z from "zod";
+const accessTokenResponseSchema = z.object({
+    access_token: z.string(),
+    token_type: z.literal("bearer"),
+    scope: z.string().transform((s) => s.split(",")),
+});
 
 // ─── GitHub API Client ──────────────────────────────────────────────────────
 
@@ -52,7 +58,7 @@ export class GitHubClient {
                 `GitHub ${res.status} ${path}: ${body.slice(0, 500)}${extra}`
             );
         }
-        return res.json() as Promise<T>;
+        return res.json();
     }
 
     async listAllRepos(): Promise<Repo[]> {
@@ -142,15 +148,8 @@ export class GitHubClient {
                 redirect_uri: redirectUri,
             }),
         });
-        const data = (await res.json()) as {
-            error?: string;
-            error_description?: string;
-            access_token?: string;
-        };
-        if (data.error)
-            throw new Error(
-                `OAuth error: ${data.error_description ?? data.error}`
-            );
+
+        const data = accessTokenResponseSchema.parse(await res.json());
         if (!data.access_token)
             throw new Error("No access_token in OAuth response");
         return data.access_token;

@@ -72,13 +72,28 @@ export function permissionsFromScopes(
 
 /**
  * Parse a PEM-encoded RSA private key and import it as a CryptoKey for RS256 signing.
+ *
+ * Accepts two formats:
+ *   1. Raw PEM (-----BEGIN ... -----) — multiline or single-line, with or without headers.
+ *   2. Base64-encoded body only — single line, handy for `.dev.vars` which doesn't support multiline values.
+ *
+ * Auto-detects by checking if the input starts with "-----BEGIN".
  */
 async function pemToCryptoKey(pem: string): Promise<CryptoKey> {
-    // Strip header/footer and whitespace
-    const base64 = pem
-        .replace(/-----BEGIN [\w\s]+-----/g, "")
-        .replace(/-----END [\w\s]+-----/g, "")
-        .replace(/\s/g, "");
+    let base64: string;
+    if (pem.startsWith("-----BEGIN")) {
+        // Raw PEM — extract base64 body, ignoring header attributes like Proc-Type, DEK-Info etc.
+        const match =
+            /-----BEGIN\s+[\w-]+-----\s*(?:(?:[\w-]+:\s*[^\n]*\n)*\n?\s*)?([A-Za-z0-9+/=\s]+)\s*-----END\s+[\w-]+-----/.exec(
+                pem
+            );
+        if (!match)
+            throw new Error("PEM? I barely know 'em. Check your key format.");
+        base64 = match[1]!.replace(/\s/g, "");
+    } else {
+        // Assume it's already base64-encoded body (no headers/footers) — for .dev.vars convenience
+        base64 = pem.replace(/\s/g, "");
+    }
     const raw = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
     return await crypto.subtle.importKey(
         "pkcs8",

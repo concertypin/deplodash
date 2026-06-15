@@ -38,7 +38,7 @@ src/
   utils/
     cors.ts          — CORS middleware
 tests/               — Vitest test suite
-  helpers.ts         — Shared test utilities (mockKVNamespace)
+  helpers.ts         — Shared test utilities (strictMock)
 ```
 
 ## Environment Variables
@@ -90,7 +90,11 @@ pnpm test
 
 ## Coding Standards
 
-See `docs/rules/` for TypeScript, testing, and tooling guidelines.
+If you can't access the project's convention, such as hono, typescript, typescript-schema, ask user for adding MCP server.
+MCP Server:
+
+- Endpoint: https://conventions.aieuroka.workers.dev/mcp (for most clients), https://conventions.aieuroka.workers.dev/with-tool/mcp (for GitHub Copilot, which doesn't support resource retrieval)
+- Streamable HTTP, without authentication
 
 ## TypeScript Configuration
 
@@ -104,3 +108,9 @@ This project uses pnpm.
 
 This project uses `wrangler` for Cloudflare Workers development and deployment.
 Configuration is in `wrangler.jsonc`.
+
+## Known Issues / TODOs
+
+- **Consent page CDN dependencies** — `src/routes/consent.ts` loads DaisyUI, Tailwind, and Lucide from external CDNs with `unsafe-inline` script-src. Should be bundled/inlined before production.
+- **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop for admin tools.
+- **OpenAPI spec incomplete** — `POST /api/token`, `POST /api/register`, `POST /auth/consent` and auth endpoints lack proper OpenAPI response schemas. See `TODO.md`.

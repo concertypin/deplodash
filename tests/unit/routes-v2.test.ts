@@ -1,5 +1,6 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, assert } from "vitest";
 import { z } from "zod";
+import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { consentRouter } from "@/routes/consent";
@@ -7,7 +8,8 @@ import { tokenRouter } from "@/routes/token";
 import { llmsRouter } from "@/routes/llms";
 import { authRouter } from "@/routes/auth";
 import { resetKeyCache } from "@/crypto";
-import { mockKVNamespace } from "../helpers";
+import { env } from "cloudflare:workers";
+import { registerAgentToken } from "@/middleware/agent-auth";
 
 const errorResponseSchema = z.object({ error: z.string() });
 
@@ -19,7 +21,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
-    KV: mockKVNamespace(),
+    KV: env.KV,
     GITHUB_APP_ID: "123456",
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
@@ -32,9 +34,10 @@ beforeEach(() => {
 
 describe("GET /llms.txt", () => {
     const app = new Hono<HonoEnv>().route("/", llmsRouter);
+    const client = testClient(app, BASE_ENV);
 
     it("returns llms.txt content", async () => {
-        const resp = await app.request("/llms.txt", {}, BASE_ENV);
+        const resp = await client["llms.txt"].$get();
         expect(resp.status).toBe(200);
         const text = await resp.text();
         expect(text).toContain("Deplodash");
@@ -47,13 +50,12 @@ describe("GET /auth/consent", () => {
     const app = new Hono<HonoEnv>()
         .route("/auth", authRouter)
         .route("/auth", consentRouter);
+    const client = testClient(app, BASE_ENV);
 
     it("redirects to login when not authenticated", async () => {
-        const resp = await app.request(
-            "/auth/consent?repo=owner/repo&scopes=contents:read",
-            {},
-            BASE_ENV
-        );
+        const resp = await client.auth.consent.$get({
+            query: { repo: "owner/repo", scopes: "contents:read" },
+        });
         // authGuard renders login page since not authenticated
         expect(resp.status).toBe(200);
         const text = await resp.text();
@@ -63,41 +65,54 @@ describe("GET /auth/consent", () => {
 
 describe("POST /api/token (without auth)", () => {
     const app = new Hono<HonoEnv>().route("/api", tokenRouter);
+    const client = testClient(app, BASE_ENV);
 
     it("returns 401 when no bearer token", async () => {
-        const resp = await app.request(
-            "/api/token",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    repo: "owner/repo",
-                    scopes: ["contents:read"],
-                }),
-            },
-            BASE_ENV
-        );
+        const resp = await client.api.token.$post({
+            json: { repo: "owner/repo", scopes: ["contents:read"] },
+        });
         expect(resp.status).toBe(401);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toBeTruthy();
     });
 
     it("returns 401 when bearer token is invalid", async () => {
-        const resp = await app.request(
-            "/api/token",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: "Bearer invalid_token",
-                },
-                body: JSON.stringify({
-                    repo: "owner/repo",
-                    scopes: ["contents:read"],
-                }),
-            },
-            BASE_ENV
+        const resp = await client.api.token.$post(
+            { json: { repo: "owner/repo", scopes: ["contents:read"] } },
+            { headers: { Authorization: "Bearer invalid_token" } }
         );
         expect(resp.status).toBe(401);
+    });
+});
+
+describe("POST /api/token (authenticated, needs consent)", () => {
+    const app = new Hono<HonoEnv>().route("/api", tokenRouter);
+    const client = testClient(app, BASE_ENV);
+
+    beforeEach(async () => {
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "test-agent-token",
+            "test-agent",
+            "Test Agent"
+        );
+    });
+
+    it("returns 202 when consent is needed", async () => {
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "owner/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer test-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const body = await resp.json();
+        assert(!("error" in body));
+        assert(
+            body?.status === "needs_consent",
+            "Expected needs_consent status"
+        );
+        expect(body.status).toBe("needs_consent");
+        expect(body.url).toContain("/auth/consent");
     });
 });

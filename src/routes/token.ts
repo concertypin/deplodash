@@ -5,8 +5,8 @@
  *
  * Flow:
  *   1. Agent POST /api/token with Bearer token + { repo, scopes }
- *   2. If consent exists → return token
- *   3. If no consent → return needs_consent with URL
+ *   2. If consent exists → return token (200)
+ *   3. If no consent → return needs_consent with URL (202)
  */
 
 import { Hono } from "hono";
@@ -33,6 +33,11 @@ const tokenResponseSchema = z.object({
     expires_at: z.string(),
 });
 
+const needsConsentResponseSchema = z.object({
+    status: z.literal("needs_consent"),
+    url: z.string(),
+});
+
 const errorResponseSchema = z.object({
     error: z.string(),
 });
@@ -40,11 +45,7 @@ const errorResponseSchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api — relative paths
 
-export const tokenRouter = new Hono<HonoEnv>();
-
-// ── POST /api/token — Request a GitHub Installation Token ────────────
-
-tokenRouter.post(
+export const tokenRouter = new Hono<HonoEnv>().post(
     "/token",
     agentAuthMiddleware(),
     describeRoute({
@@ -52,10 +53,19 @@ tokenRouter.post(
             "Request a scoped GitHub Installation Token for a repository",
         responses: {
             200: {
-                description: "Token issued or needs consent",
+                description: "Token issued",
                 content: {
                     "application/json": {
                         schema: resolver(tokenResponseSchema),
+                    },
+                },
+            },
+            202: {
+                description:
+                    "Consent required — user must approve via the returned URL",
+                content: {
+                    "application/json": {
+                        schema: resolver(needsConsentResponseSchema),
                     },
                 },
             },
@@ -100,7 +110,6 @@ tokenRouter.post(
 
         try {
             const tokenService = new TokenService(c.env.KV);
-            const githubApp = new GitHubApp(appId, installationId, privateKey);
 
             // Determine base URL for consent redirect
             const url = new URL(c.req.url);
@@ -108,10 +117,16 @@ tokenRouter.post(
 
             const result = await tokenService.requestToken(
                 { repo, scopes, baseUrl },
-                () => githubApp.requestToken(scopes)
+                () =>
+                    new GitHubApp(
+                        appId,
+                        installationId,
+                        privateKey
+                    ).requestToken(scopes)
             );
 
-            return c.json(result, 200);
+            const status = result.status === "needs_consent" ? 202 : 200;
+            return c.json(result, status);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             return c.json({ error: msg }, 500);

@@ -8,7 +8,8 @@
 
 import type { ConsentRecord, CachedToken } from "@/types";
 import { hashScopes } from "@/helpers";
-
+import * as z from "zod";
+const dropBufferTime = 5 * 60 * 1000;
 // ─── KV prefix helpers ───────────────────────────────────────────────────────
 
 function consentKey(repo: string, scopesHash: string): string {
@@ -69,6 +70,10 @@ export class TokenService {
 
     // ─── Token caching ───────────────────────────────────────────────────────
 
+    private static readonly kvSchema = z.object({
+        token: z.string(),
+        expires_at: z.string(),
+    });
     /**
      * Retrieve a cached token for (repo, scopes), or null if not cached / expired.
      */
@@ -80,10 +85,10 @@ export class TokenService {
         const key = tokenCacheKey(repo, hash);
         const value = await this.kv.get(key, "json");
         if (!value) return null;
-        const cached = value as CachedToken;
+        const cached = TokenService.kvSchema.parse(value);
         // Check if expired (with 5 min buffer)
         const expiresAt = new Date(cached.expires_at).getTime();
-        if (expiresAt - 5 * 60 * 1000 < Date.now()) {
+        if (expiresAt - dropBufferTime < Date.now()) {
             await this.kv.delete(key);
             return null;
         }
@@ -92,6 +97,7 @@ export class TokenService {
 
     /**
      * Cache a GitHub Installation Token.
+     * Skips caching if the token is too close to expiry (within 5 min + buffer).
      */
     async cacheToken(
         repo: string,
@@ -104,10 +110,12 @@ export class TokenService {
         const cached: CachedToken = { token, expires_at: expiresAt };
         // Cache until 5 min before actual expiry, with max 1 hour TTL
         const expiresAtMs = new Date(expiresAt).getTime();
-        const ttl = Math.max(
-            60,
-            Math.floor((expiresAtMs - Date.now() - 5 * 60 * 1000) / 1000)
-        );
+        const safeUntil = expiresAtMs - dropBufferTime;
+        if (safeUntil <= Date.now()) {
+            // Token is already too close to expiry (or expired) — don't bother caching
+            return;
+        }
+        const ttl = Math.floor((safeUntil - Date.now()) / 1000);
         await this.kv.put(key, JSON.stringify(cached), {
             expirationTtl: Math.min(ttl, 3600),
         });

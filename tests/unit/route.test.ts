@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { testClient } from "hono/testing";
 import { router } from "@/route";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { resetKeyCache } from "@/crypto";
-import { mockKVNamespace } from "../helpers";
+import { env } from "cloudflare:workers";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -13,12 +14,11 @@ const MIN_ENV: HonoEnv["Bindings"] = {
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
-    KV: mockKVNamespace(),
+    KV: env.KV,
 };
 
-function createApp() {
-    return new Hono<HonoEnv>().route("/", router);
-}
+const app = new Hono<HonoEnv>().route("/", router);
+const client = testClient(app, MIN_ENV);
 
 beforeEach(() => {
     resetKeyCache();
@@ -27,10 +27,10 @@ beforeEach(() => {
 // ─── Route tests ────────────────────────────────────────────────────────────
 
 describe("route.ts - GET /auth/github", () => {
-    const app = createApp();
-
     it("redirects to GitHub OAuth authorize URL", async () => {
-        const resp = await app.request("/auth/github", {}, MIN_ENV);
+        const resp = await client.auth.github.$get({
+            query: {},
+        });
         expect(resp.status).toBe(302);
         const location = resp.headers.get("Location") || "";
         expect(location).toContain("github.com/login/oauth/authorize");
@@ -41,7 +41,9 @@ describe("route.ts - GET /auth/github", () => {
     });
 
     it("includes next parameter when provided", async () => {
-        const resp = await app.request("/auth/github?next=/setup", {}, MIN_ENV);
+        const resp = await client.auth.github.$get({
+            query: { next: "/setup" },
+        });
         const location = resp.headers.get("Location") || "";
         // state contains encrypted JSON with {n:"/setup"}
         expect(resp.status).toBe(302);
@@ -50,10 +52,8 @@ describe("route.ts - GET /auth/github", () => {
 });
 
 describe("route.ts - GET / (unauthenticated)", () => {
-    const app = createApp();
-
     it("returns login page when no session cookie", async () => {
-        const resp = await app.request("/", {}, MIN_ENV);
+        const resp = await client.index.$get();
         expect(resp.status).toBe(200);
         const text = await resp.text();
         expect(text).toContain("Deploy Key Dashboard");
@@ -62,26 +62,24 @@ describe("route.ts - GET / (unauthenticated)", () => {
 });
 
 describe("route.ts - GET /callback", () => {
-    const app = createApp();
-
     it("returns 400 when code and state are missing", async () => {
-        const resp = await app.request("/callback", {}, MIN_ENV);
+        const resp = await client.callback.$get();
         expect(resp.status).toBe(400);
         expect(await resp.text()).toContain("Missing code or state");
     });
 
     it("returns 400 when state is missing", async () => {
-        const resp = await app.request("/callback?code=testcode", {}, MIN_ENV);
+        const resp = await client.callback.$get({
+            query: { code: "testcode" },
+        });
         expect(resp.status).toBe(400);
         expect(await resp.text()).toContain("Missing code or state");
     });
 });
 
 describe("route.ts - GET /logout", () => {
-    const app = createApp();
-
     it("clears session cookie and redirects to /", async () => {
-        const resp = await app.request("/logout", {}, MIN_ENV);
+        const resp = await client.logout.$get();
         expect(resp.status).toBe(302);
         const location = resp.headers.get("Location");
         expect(location).toBe("/");

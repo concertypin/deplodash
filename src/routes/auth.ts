@@ -8,11 +8,7 @@ import * as z from "zod";
 // ─── Auth routes (mounted at /auth) ───────────────────────────────────────────
 // Paths are relative to the mount point (/auth/github).
 
-export const authRouter = new Hono<HonoEnv>();
-
-// ── Start PKCE OAuth flow ─────────────────────────────────────────────────
-
-authRouter.get(
+export const authRouter = new Hono<HonoEnv>().get(
     "/github",
     validator(
         "query",

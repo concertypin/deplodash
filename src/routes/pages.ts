@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { setCookie } from "hono/cookie";
+import { validator } from "hono-openapi";
+import * as z from "zod";
 import type { HonoEnv, RepoStatus, AppState } from "@/types";
 import { authGuard, getSshKey, SSH_COOKIE, MAX_AGE_SECS } from "@/middleware";
 import { getOrInitKey, encryptWith } from "@/crypto";
@@ -7,6 +9,15 @@ import { normalizeKey, escapeHtml } from "@/helpers";
 import { renderSetupPage, renderRegisterPage, renderDashboard } from "@/html";
 import type { GitHubClient } from "@/github";
 import { TokenExpiredError } from "@/errors";
+
+// ─── Zod schemas ─────────────────────────────────────────────────────────────
+
+const setupPubkeySchema = z.object({
+    pubkey: z
+        .string()
+        .min(1, "SSH public key is required")
+        .startsWith("ssh-", "Invalid SSH public key"),
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -72,93 +83,88 @@ async function loadRepoStatuses(
 // ─── Page Routes ─────────────────────────────────────────────────────────────
 // Mounted at / — paths are /, /setup, /register
 
-export const pagesRouter = new Hono<HonoEnv>();
-
-// ── Set up SSH key page ───────────────────────────────────────────────────
-
-pagesRouter.get("/setup", authGuard(), (c) => c.html(renderSetupPage()));
-
-pagesRouter.post("/setup", authGuard(), async (c) => {
-    const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
-    const { pubkey } = await c.req.json<{ pubkey: string }>();
-    if (typeof pubkey !== "string" || !pubkey.startsWith("ssh-")) {
-        return c.json({ error: "Invalid SSH public key" }, 400);
-    }
-    const encrypted = await encryptWith(key, pubkey);
-    setCookie(c, SSH_COOKIE, encrypted, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "Lax",
-        secure: true,
-        maxAge: MAX_AGE_SECS,
-    });
-    return c.json({ ok: true });
-});
-
-// ── Dashboard (root) ──────────────────────────────────────────────────────
-
-pagesRouter.get("/", authGuard(), async (c) => {
-    const client = c.get("client")!;
-    const sshKey = getSshKey(c);
-
-    if (!sshKey) return c.redirect("/setup");
-
-    // If GITHUB_TOKEN is set via env var, treat as read-only mode
-    const readOnly = !!c.env.GITHUB_TOKEN;
-    const normalizedKey = normalizeKey(sshKey);
-
-    try {
-        const statuses = await loadRepoStatuses(client, normalizedKey);
-        const state: AppState = {
-            sshKey,
-            sshKeyTitle: sshKey.split(/\s+/).slice(-1)[0] || "ssh key",
-            normalizedKey,
-            repos: statuses,
-            loadedAt: new Date(),
-            readOnly,
-        };
-        return c.html(renderDashboard(state));
-    } catch (err: unknown) {
-        if (err instanceof TokenExpiredError) {
-            return c.redirect("/logout");
+export const pagesRouter = new Hono<HonoEnv>()
+    .get("/setup", authGuard(), (c) => c.html(renderSetupPage()))
+    .post(
+        "/setup",
+        authGuard(),
+        validator("json", setupPubkeySchema),
+        async (c) => {
+            const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
+            const { pubkey } = c.req.valid("json");
+            const encrypted = await encryptWith(key, pubkey);
+            setCookie(c, SSH_COOKIE, encrypted, {
+                path: "/",
+                httpOnly: true,
+                sameSite: "Lax",
+                secure: true,
+                maxAge: MAX_AGE_SECS,
+            });
+            return c.json({ ok: true });
         }
-        const msg = err instanceof Error ? err.message : String(err);
-        return c.html(
-            `<div class="p-8 text-error">Error: ${escapeHtml(msg)}</div>`
-        );
-    }
-});
+    )
 
-// ── Register deploy key page ──────────────────────────────────────────────
+    // ── Dashboard (root) ──────────────────────────────────────────────────────
 
-pagesRouter.get("/register", (c) => {
-    const repo = c.req.query("repo") || "";
-    const pubkey = c.req.query("pubkey") || getSshKey(c) || "";
-    const perm = c.req.query("perm") || "RW";
-    const keyName = c.req.query("key_name") || "nanobot";
-    const result = c.req.query("_result");
-    let success: string | undefined;
-    let error: string | undefined;
-    if (result) {
+    .get("/", authGuard(), async (c) => {
+        const client = c.get("client")!;
+        const sshKey = getSshKey(c);
+
+        if (!sshKey) return c.redirect("/setup");
+
+        // If GITHUB_TOKEN is set via env var, treat as read-only mode
+        const readOnly = !!c.env.GITHUB_TOKEN;
+        const normalizedKey = normalizeKey(sshKey);
+
         try {
-            const parsed = JSON.parse(result) as {
-                ok?: string;
-                error?: string;
+            const statuses = await loadRepoStatuses(client, normalizedKey);
+            const state: AppState = {
+                sshKey,
+                sshKeyTitle: sshKey.split(/\s+/).slice(-1)[0] || "ssh key",
+                normalizedKey,
+                repos: statuses,
+                loadedAt: new Date(),
+                readOnly,
             };
-            if (parsed.ok) success = parsed.ok;
-            else error = parsed.error || "Unknown error";
-        } catch {
-            // ignore parse errors
+            return c.html(renderDashboard(state));
+        } catch (err: unknown) {
+            if (err instanceof TokenExpiredError) {
+                return c.redirect("/logout");
+            }
+            const msg = err instanceof Error ? err.message : String(err);
+            return c.html(
+                `<div class="p-8 text-error">Error: ${escapeHtml(msg)}</div>`
+            );
         }
-    }
-    return c.html(
-        renderRegisterPage({
-            repo,
-            pubkey,
-            perm,
-            keyName,
-            ...(success !== undefined ? { success } : {}),
-            ...(error !== undefined ? { error } : {}),
-        })
-    );
-});
+    })
+    .get("/register", (c) => {
+        const repo = c.req.query("repo") || "";
+        const pubkey = c.req.query("pubkey") || getSshKey(c) || "";
+        const perm = c.req.query("perm") || "RW";
+        const keyName = c.req.query("key_name") || "nanobot";
+        const result = c.req.query("_result");
+        let success: string | undefined;
+        let error: string | undefined;
+        if (result) {
+            try {
+                const parsed = JSON.parse(result) as {
+                    ok?: string;
+                    error?: string;
+                };
+                if (parsed.ok) success = parsed.ok;
+                else error = parsed.error || "Unknown error";
+            } catch {
+                // ignore parse errors
+            }
+        }
+        return c.html(
+            renderRegisterPage({
+                repo,
+                pubkey,
+                perm,
+                keyName,
+                ...(success !== undefined ? { success } : {}),
+                ...(error !== undefined ? { error } : {}),
+            })
+        );
+    });

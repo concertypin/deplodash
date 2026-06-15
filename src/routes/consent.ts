@@ -98,58 +98,56 @@ function renderConsentPage(params: {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /auth — relative paths
 
-export const consentRouter = new Hono<HonoEnv>();
-
-// ── GET /auth/consent — Show consent page ────────────────────────────
-
-consentRouter.get(
-    "/consent",
-    authGuard(),
-    validator(
-        "query",
-        z.object({
-            repo: z.string().min(1),
-            scopes: z.string().min(1),
-        })
-    ),
-    (c) => {
-        const { repo, scopes } = c.req.valid("query");
-        const html = renderConsentPage({ repo, scopes });
-        return c.html(html);
-    }
-);
-
-// ── POST /auth/consent — Process consent ─────────────────────────────
-
-consentRouter.post(
-    "/consent",
-    authGuard(),
-    validator(
-        "form",
-        z.object({
-            repo: z.string().min(1),
-            scopes: z.string().min(1),
-        })
-    ),
-    async (c) => {
-        const { repo, scopes } = c.req.valid("form");
-        const tokenService = new TokenService(c.env.KV);
-        try {
-            const scopeList = scopes
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
-            await tokenService.recordConsent(repo, scopeList);
-            const html = renderConsentPage({
-                repo,
-                scopes,
-                success: true,
-            });
+export const consentRouter = new Hono<HonoEnv>()
+    .get(
+        "/consent",
+        authGuard(),
+        validator(
+            "query",
+            z.object({
+                repo: z.string().min(1),
+                scopes: z.string().min(1),
+            })
+        ),
+        (c) => {
+            const { repo, scopes } = c.req.valid("query");
+            const html = renderConsentPage({ repo, scopes });
             return c.html(html);
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const html = renderConsentPage({ repo, scopes, error: msg });
-            return c.html(html, 400);
         }
-    }
-);
+    )
+    .post(
+        "/consent",
+        authGuard(),
+        validator(
+            "form",
+            z.object({
+                repo: z.string().min(1),
+                scopes: z.string().min(1),
+            })
+        ),
+        async (c) => {
+            const { repo, scopes } = c.req.valid("form");
+            const tokenService = new TokenService(c.env.KV);
+            try {
+                const scopeList = scopes
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                await tokenService.recordConsent(repo, scopeList);
+                const html = renderConsentPage({
+                    repo,
+                    scopes,
+                    success: true,
+                });
+                return c.html(html);
+            } catch (err: unknown) {
+                console.error("consent: failed to record consent", err);
+                const html = renderConsentPage({
+                    repo,
+                    scopes,
+                    error: "Failed to record consent. Please try again.",
+                });
+                return c.html(html, 400);
+            }
+        }
+    );
