@@ -8,9 +8,21 @@
     "observability": {
         "enabled": true,
     },
+    "kv_namespaces": [
+        {
+            "binding": "KV",
+            "id": "7970e6b1d4a349ca8084b7011f4ac53a",
+        },
+    ],
     "env": {
         "prod": {
             "name": "deplodash",
+            "kv_namespaces": [
+                {
+                    "binding": "KV",
+                    "id": "7970e6b1d4a349ca8084b7011f4ac53a",
+                },
+            ],
         },
     },
 }

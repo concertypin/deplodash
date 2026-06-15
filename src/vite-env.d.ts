@@ -16,3 +16,8 @@ interface ImportMeta {
 interface ViteTypeOptions {
     strictImportMetaEnv: unknown;
 }
+declare module "cloudflare:workers" {
+    interface ProvidedEnv {
+        KV: KVNamespace;
+    }
+}

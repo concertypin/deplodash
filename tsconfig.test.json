@@ -2,9 +2,9 @@
     "compilerOptions": {
         "tsBuildInfoFile": "./node_modules/.cache/test.tsbuildinfo",
         "lib": ["ESNext", "DOM", "DOM.Iterable"],
-        "types": ["vite/client", "@cloudflare/vitest-pool-workers"]
+        "types": ["vite/client", "@cloudflare/vitest-pool-workers/types"]
     },
-    "include": ["tests/**/*.ts"],
+    "include": ["tests/**/*.ts", "worker-configuration.d.ts"],
     "references": [
         {
             "path": "./tsconfig.app.json"

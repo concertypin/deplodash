@@ -23,14 +23,31 @@ export type Env = {
      * Direct GitHub PAT — skips OAuth flow (optional, dev/testing only).
      */
     GITHUB_TOKEN?: string;
+    /**
+     * Cloudflare KV namespace for agent tokens, consent records, and token cache.
+     */
+    KV: KVNamespace;
+    /**
+     * GitHub App ID (required for v2 token service).
+     */
+    GITHUB_APP_ID?: string;
+    /**
+     * PEM-encoded RSA private key for the GitHub App (required for v2).
+     */
+    GITHUB_APP_PRIVATE_KEY?: string;
+    /**
+     * GitHub App Installation ID (required for v2).
+     */
+    GITHUB_INSTALLATION_ID?: string;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────
 
 export type AppVariables = {
     gh_token?: string | null;
-    ssh_key?: string | null;
     client?: GitHubClient;
+    /** Agent ID extracted from bearer token (v2). */
+    agent_id?: string;
 };
 
 export type HonoEnv = {
@@ -54,25 +71,47 @@ export type Repo = {
     readonly description: string | null;
 };
 
-export type DeployKey = {
-    readonly id: number;
-    readonly key: string;
-    readonly title: string;
-    readonly read_only: boolean;
-    readonly verified: boolean;
+// ─── v2 — GitHub App Token Service Types ─────────────────────────────────────
+
+/**
+ * GitHub user info returned by GET /user.
+ */
+export type GitHubUser = {
+    id: number;
+    login: string;
+    avatar_url: string;
+    name: string | null;
 };
 
-export type RepoStatus = {
-    repo: Repo;
-    keyId: number | null;
-    hasAdmin: boolean;
+/**
+ * An agent token record stored in KV.
+ */
+export type AgentInfo = {
+    agent_id: string;
+    label: string;
+    created_at: string;
 };
 
-export type AppState = {
-    sshKey: string;
-    sshKeyTitle: string;
-    normalizedKey: string;
-    repos: RepoStatus[];
-    loadedAt: Date;
-    readOnly: boolean;
+/**
+ * Scope presets for GitHub App Installation Tokens.
+ */
+export type ScopePreset =
+    | "contents:read"
+    | "contents:write"
+    | "contents:write+workflows:write"
+    | "admin";
+
+/**
+ * A consent record stored in KV.
+ */
+export type ConsentRecord = {
+    granted_at: string;
+};
+
+/**
+ * A cached GitHub Installation Token in KV.
+ */
+export type CachedToken = {
+    token: string;
+    expires_at: string;
 };

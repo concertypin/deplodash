@@ -3,17 +3,13 @@ import { Scalar } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { openAPIRouteHandler } from "hono-openapi";
-import { cors } from "@/utils/cors";
 import type { HonoEnv } from "@/types";
 /**
  * @fileoverview
- * Main entry point — mounts CORS, logger, all routes, and OpenAPI/Scalar docs.
+ * Main entry point — mounts logger, all routes, and OpenAPI/Scalar docs.
  */
 
-const app = new Hono<HonoEnv>()
-    .use("*", cors)
-    .use("*", logger())
-    .route("/", router);
+const app = new Hono<HonoEnv>().use("*", logger()).route("/", router);
 
 // ── OpenAPI documentation ─────────────────────────────────────────────────
 
@@ -25,7 +21,7 @@ app.get(
                 title: "Deplodash API",
                 version: "1.0.0",
                 description:
-                    "GitHub Deploy Key Dashboard — manage deploy keys across all your repositories.",
+                    "Deplodash — GitHub App Token Service. Issue scoped installation tokens for AI agents.",
             },
             servers: [
                 { url: "http://localhost:5178", description: "Local Server" },
