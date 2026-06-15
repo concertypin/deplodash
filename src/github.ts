@@ -1,5 +1,5 @@
 import { TokenExpiredError } from "@/errors";
-import type { Repo, DeployKey } from "@/types";
+import type { Repo, GitHubUser } from "@/types";
 import * as z from "zod";
 const accessTokenResponseSchema = z.object({
     access_token: z.string(),
@@ -73,35 +73,8 @@ export class GitHubClient {
         return all;
     }
 
-    async listDeployKeys(owner: string, repo: string): Promise<DeployKey[]> {
-        const all: DeployKey[] = [];
-        for (let page = 1; ; page++) {
-            const batch = await this.req<DeployKey[]>(
-                `/repos/${owner}/${repo}/keys?per_page=100&page=${page}`
-            );
-            all.push(...batch);
-            if (batch.length < 100) break;
-        }
-        return all;
-    }
-
-    addDeployKey(
-        owner: string,
-        repo: string,
-        title: string,
-        key: string,
-        writable: boolean
-    ): Promise<DeployKey> {
-        return this.req<DeployKey>(`/repos/${owner}/${repo}/keys`, {
-            method: "POST",
-            body: JSON.stringify({ title, key, read_only: !writable }),
-        });
-    }
-
-    removeDeployKey(owner: string, repo: string, keyId: number): Promise<void> {
-        return this.req<void>(`/repos/${owner}/${repo}/keys/${keyId}`, {
-            method: "DELETE",
-        });
+    async getUser(): Promise<GitHubUser> {
+        return this.req<GitHubUser>("/user");
     }
 
     createRepo(name: string, isPrivate: boolean): Promise<Repo> {

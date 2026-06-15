@@ -56,7 +56,7 @@ describe("route.ts - GET / (unauthenticated)", () => {
         const resp = await client.index.$get();
         expect(resp.status).toBe(200);
         const text = await resp.text();
-        expect(text).toContain("Deploy Key Dashboard");
+        expect(text).toContain("Deplodash");
         expect(text).toContain("Login with GitHub");
     });
 });

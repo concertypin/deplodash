@@ -211,4 +211,66 @@ export class GitHubApp {
         const perms = permissionsFromScopes(scopes);
         return this.getInstallationToken(perms);
     }
+
+    /**
+     * Ensure a repository exists. If it doesn't, create it using the
+     * GitHub App installation's admin permissions.
+     *
+     * @returns true if the repo already existed or was created successfully.
+     */
+    async ensureRepoExists(owner: string, repo: string): Promise<boolean> {
+        // 1. Get installation token with admin permission
+        const adminToken = await this.getInstallationToken({
+            administration: "write",
+        });
+
+        // 2. Check if repo already exists
+        const checkRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}`,
+            {
+                headers: { Authorization: `Bearer ${adminToken.token}` },
+            }
+        );
+        if (checkRes.status === 200) return true;
+        if (checkRes.status !== 404) {
+            const body = await checkRes.text().catch(() => "");
+            throw new Error(
+                `Failed to check repo existence: ${checkRes.status} ${body.slice(0, 200)}`
+            );
+        }
+
+        // 3. Determine if owner is an org or user
+        const orgRes = await fetch(`https://api.github.com/orgs/${owner}`, {
+            headers: { Authorization: `Bearer ${adminToken.token}` },
+        });
+        const isOrg = orgRes.status === 200;
+
+        // 4. Create the repo
+        const createUrl = isOrg
+            ? `https://api.github.com/orgs/${owner}/repos`
+            : `https://api.github.com/user/repos`;
+
+        const createRes = await fetch(createUrl, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${adminToken.token}`,
+                "Content-Type": "application/json",
+                Accept: "application/vnd.github+json",
+            },
+            body: JSON.stringify({
+                name: repo,
+                private: true,
+                auto_init: false,
+            }),
+        });
+
+        if (!createRes.ok) {
+            const body = await createRes.text().catch(() => "");
+            throw new Error(
+                `Failed to create repo ${owner}/${repo}: ${createRes.status} ${body.slice(0, 300)}`
+            );
+        }
+
+        return true;
+    }
 }

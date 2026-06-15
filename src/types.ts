@@ -45,7 +45,6 @@ export type Env = {
 
 export type AppVariables = {
     gh_token?: string | null;
-    ssh_key?: string | null;
     client?: GitHubClient;
     /** Agent ID extracted from bearer token (v2). */
     agent_id?: string;
@@ -70,29 +69,6 @@ export type Repo = {
     };
     readonly html_url: string;
     readonly description: string | null;
-};
-
-export type DeployKey = {
-    readonly id: number;
-    readonly key: string;
-    readonly title: string;
-    readonly read_only: boolean;
-    readonly verified: boolean;
-};
-
-export type RepoStatus = {
-    repo: Repo;
-    keyId: number | null;
-    hasAdmin: boolean;
-};
-
-export type AppState = {
-    sshKey: string;
-    sshKeyTitle: string;
-    normalizedKey: string;
-    repos: RepoStatus[];
-    loadedAt: Date;
-    readOnly: boolean;
 };
 
 // ─── v2 — GitHub App Token Service Types ─────────────────────────────────────

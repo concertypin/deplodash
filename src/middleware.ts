@@ -9,10 +9,9 @@ import { renderLoginPage } from "@/html";
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 export const COOKIE_NAME = "session";
-export const SSH_COOKIE = "ssh_key";
 export const MAX_AGE_SECS = 30 * 24 * 3600; // 30 days
 
-// ─── Session & SSH-key decryption middleware ─────────────────────────────────
+// ─── Session cookie decryption middleware ─────────────────────────────────────
 
 export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
     return async (c, next) => {
@@ -23,19 +22,6 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
         if (packet) {
             const plain = await decryptWith(key, packet);
             if (plain) c.set("gh_token", plain);
-        }
-
-        // Decrypt SSH-key cookie → ssh_key
-        const sshPacket = getCookie(c, SSH_COOKIE);
-        if (sshPacket) {
-            const plain = await decryptWith(key, sshPacket);
-            if (!plain) {
-                return c.text(
-                    "저장된 SSH 키 쿠키를 복호화할 수 없습니다. /setup에서 키를 다시 등록하거나 쿠키를 삭제해주세요.",
-                    400
-                );
-            }
-            c.set("ssh_key", plain);
         }
 
         await next();
@@ -57,12 +43,4 @@ export function authGuard(): MiddlewareHandler<HonoEnv> {
         c.set("client", new GitHubClient(token));
         await next();
     };
-}
-
-// ─── Helper to get SSH key from variable ─────────────────────────────────────
-
-export function getSshKey(c: {
-    get: (k: string) => string | undefined;
-}): string {
-    return c.get("ssh_key") ?? "";
 }

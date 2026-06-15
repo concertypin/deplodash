@@ -1,44 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-    normalizeKey,
-    escapeHtml,
-    parseRepo,
-    parsePerm,
-    isSafeRedirect,
-} from "@/helpers";
-
-describe("normalizeKey", () => {
-    it("strips extra fields beyond algorithm + key", () => {
-        expect(
-            normalizeKey(
-                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGKO0OZzvYvj/olDURZA7DvCsnV19GhNyIpCBNX/CAfr nanobot-risuai"
-            )
-        ).toBe(
-            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGKO0OZzvYvj/olDURZA7DvCsnV19GhNyIpCBNX/CAfr"
-        );
-    });
-
-    it("handles multiple spaces", () => {
-        expect(
-            normalizeKey(
-                "  ssh-rsa   AAAAB3NzaC1yc2EAAAADAQABAAABAQDC  comment  "
-            )
-        ).toBe("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDC");
-    });
-
-    it("handles minimal key", () => {
-        expect(normalizeKey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5")).toBe(
-            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"
-        );
-    });
-
-    it("is idempotent", () => {
-        const k =
-            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGKO0OZzvYvj/olDURZA7DvCsnV19GhNyIpCBNX/CAfr";
-        expect(normalizeKey(k)).toBe(k);
-        expect(normalizeKey(normalizeKey(`${k}   extra`))).toBe(k);
-    });
-});
+import { escapeHtml, parseRepo, isSafeRedirect } from "@/helpers";
 
 describe("escapeHtml", () => {
     it("escapes special chars", () => {
@@ -77,20 +38,6 @@ describe("parseRepo", () => {
         expect(parseRepo("invalid")).toBeNull();
         expect(parseRepo("")).toBeNull();
         expect(parseRepo("/repo")).toBeNull();
-    });
-});
-
-describe("parsePerm", () => {
-    it("returns true for RW", () => {
-        expect(parsePerm("RW")).toBe(true);
-    });
-
-    it("returns false for RO", () => {
-        expect(parsePerm("RO")).toBe(false);
-    });
-
-    it("returns true for other values", () => {
-        expect(parsePerm("something")).toBe(true);
     });
 });
 

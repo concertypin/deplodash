@@ -5,8 +5,9 @@
  *
  * Flow:
  *   1. Agent POST /api/token with Bearer token + { repo, scopes }
- *   2. If consent exists → return token (200)
- *   3. If no consent → return needs_consent with URL (202)
+ *   2. If repo doesn't exist → auto-create it (requires admin permission)
+ *   3. If consent exists → return token (200)
+ *   4. If no consent → return needs_consent with URL (202)
  */
 
 import { Hono } from "hono";
@@ -109,6 +110,12 @@ export const tokenRouter = new Hono<HonoEnv>().post(
         }
 
         try {
+            const gh = new GitHubApp(appId, installationId, privateKey);
+
+            // Auto-create the repo if it doesn't exist
+            const [owner, name] = repo.split("/") as [string, string];
+            await gh.ensureRepoExists(owner, name);
+
             const tokenService = new TokenService(c.env.KV);
 
             // Determine base URL for consent redirect
@@ -117,12 +124,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
             const result = await tokenService.requestToken(
                 { repo, scopes, baseUrl },
-                () =>
-                    new GitHubApp(
-                        appId,
-                        installationId,
-                        privateKey
-                    ).requestToken(scopes)
+                () => gh.requestToken(scopes)
             );
 
             const status = result.status === "needs_consent" ? 202 : 200;

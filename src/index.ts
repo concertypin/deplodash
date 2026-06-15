@@ -21,7 +21,7 @@ app.get(
                 title: "Deplodash API",
                 version: "1.0.0",
                 description:
-                    "GitHub Deploy Key Dashboard — manage deploy keys across all your repositories.",
+                    "Deplodash — GitHub App Token Service. Issue scoped installation tokens for AI agents.",
             },
             servers: [
                 { url: "http://localhost:5178", description: "Local Server" },
