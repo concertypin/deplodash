@@ -15,9 +15,6 @@
 
 import { spawn } from "child_process";
 import { randomBytes } from "crypto";
-import { writeFileSync, unlinkSync, rmSync, mkdtempSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
 
 interface TokenRecord {
     agent_id: string;
@@ -51,12 +48,13 @@ async function runWrangler(
     wrArgs: string[]
 ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-        const wrCmd = ["npx", "wrangler", "kv", "key", ...wrArgs]
-            .map((a) => (/[\s"]/.test(a) ? JSON.stringify(a) : a))
-            .join(" ");
-        const proc = spawn(wrCmd, {
+        const isWin = process.platform === "win32";
+        const cmd = isWin ? "cmd" : "npx";
+        const args = isWin
+            ? ["/d", "/s", "/c", "npx", "wrangler", "kv", "key", ...wrArgs]
+            : ["wrangler", "kv", "key", ...wrArgs];
+        const proc = spawn(cmd, args, {
             stdio: ["ignore", "pipe", "pipe"],
-            shell: true,
         });
         let out = "";
         let err = "";
@@ -128,29 +126,10 @@ async function createToken(agentId: string, label: string): Promise<void> {
         created_at: new Date().toISOString(),
     });
     const key = tokenKey(token);
-    const tmpDir = mkdtempSync(join(tmpdir(), "dpl-"));
-    const tmpFile = join(tmpDir, "token.json");
-    writeFileSync(tmpFile, value, "utf-8");
     console.log(`Registering token for agent "${agentId}"...`);
-    try {
-        await runWrangler([
-            "put",
-            ...binding,
-            key,
-            "--path",
-            tmpFile,
-            ...localFlag,
-        ]);
-        console.log(`\n  Token: ${token}\n`);
-        console.log(`  Authorization: Bearer ${token}`);
-    } finally {
-        try {
-            unlinkSync(tmpFile);
-            rmSync(tmpDir, { recursive: true, force: true });
-        } catch {
-            // temp file cleanup is best-effort
-        }
-    }
+    await runWrangler(["put", ...binding, key, value, ...localFlag]);
+    console.log(`\n  Token: ${token}\n`);
+    console.log(`  Authorization: Bearer ${token}`);
 }
 
 async function revokeToken(token: string): Promise<void> {
