@@ -83,22 +83,33 @@ export class TokenService {
         const entries = await this.kv.list({ prefix: CONSENT_PREFIX });
         const results: ConsentEntry[] = [];
 
-        for (const key of entries.keys) {
-            const value = await this.kv.get(key.name, "json");
-            if (!value) continue;
-            const record = value as Record<string, unknown>;
-            // Extract repo and scopes from the stored record
-            const repo =
-                typeof record.repo === "string"
-                    ? record.repo
-                    : (key.name.slice(CONSENT_PREFIX.length).split(":")[0] ??
-                      "");
-            const scopes =
-                typeof record.scopes === "string" ? record.scopes : "";
-            const grantedAt =
-                typeof record.granted_at === "string" ? record.granted_at : "";
-            if (repo && scopes && grantedAt) {
-                results.push({ repo, scopes, granted_at: grantedAt });
+        // Fetch consent records in parallel, batching to stay within Worker subrequest limits
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < entries.keys.length; i += BATCH_SIZE) {
+            const batch = entries.keys.slice(i, i + BATCH_SIZE);
+            const values = await Promise.all(
+                batch.map((key) => this.kv.get(key.name, "json"))
+            );
+            for (let j = 0; j < batch.length; j++) {
+                const value = values[j];
+                if (!value) continue;
+                const record = value as Record<string, unknown>;
+                // Extract repo and scopes from the stored record
+                const repo =
+                    typeof record.repo === "string"
+                        ? record.repo
+                        : (batch[j]!.name.slice(CONSENT_PREFIX.length).split(
+                              ":"
+                          )[0] ?? "");
+                const scopes =
+                    typeof record.scopes === "string" ? record.scopes : "";
+                const grantedAt =
+                    typeof record.granted_at === "string"
+                        ? record.granted_at
+                        : "";
+                if (repo && scopes && grantedAt) {
+                    results.push({ repo, scopes, granted_at: grantedAt });
+                }
             }
         }
 
@@ -126,9 +137,16 @@ export class TokenService {
      * Useful when a user wants to revoke all access to a specific repo.
      */
     async revokeAllConsentsForRepo(repo: string): Promise<void> {
-        const prefix = `${CONSENT_PREFIX}${repo}:`;
-        const entries = await this.kv.list({ prefix });
-        await Promise.all(entries.keys.map((k) => this.kv.delete(k.name)));
+        const consentPrefix = `${CONSENT_PREFIX}${repo}:`;
+        const tokenPrefix = `gh_token:${repo}:`;
+        const [consentEntries, tokenEntries] = await Promise.all([
+            this.kv.list({ prefix: consentPrefix }),
+            this.kv.list({ prefix: tokenPrefix }),
+        ]);
+        await Promise.all([
+            ...consentEntries.keys.map((k) => this.kv.delete(k.name)),
+            ...tokenEntries.keys.map((k) => this.kv.delete(k.name)),
+        ]);
     }
 
     // ─── Token caching ───────────────────────────────────────────────────────

@@ -165,7 +165,7 @@ const ConsentList: FC<{ consents: ConsentItem[] }> = ({ consents }) => (
 );
 
 const ConsentRow: FC<{ item: ConsentItem }> = ({ item }) => {
-    const grantedDate = new Date(item.granted_at).toLocaleDateString("en-US", {
+    const grantedDate = new Date(item.granted_at).toLocaleString("en-US", {
         year: "numeric",
         month: "short",
         day: "numeric",

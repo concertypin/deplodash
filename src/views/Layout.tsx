@@ -32,7 +32,10 @@ export const Layout: FC<LayoutProps> = ({ title, children }) => (
             <script src="https://cdn.tailwindcss.com" />
             <script src="https://unpkg.com/lucide@0.428.0/dist/umd/lucide.min.js" />
         </head>
-        <body>{children}</body>
+        <body>
+            {children}
+            <script>lucide.createIcons()</script>
+        </body>
     </html>
 );
 

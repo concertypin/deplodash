@@ -126,7 +126,17 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 );
             }
 
-            // Consent exists: create repo if needed, then issue token
+            // Consent exists: check cache first to avoid redundant GitHub API calls
+            const cached = await tokenService.getCachedToken(repo, scopes);
+            if (cached) {
+                return c.json({
+                    status: "ok",
+                    token: cached.token,
+                    expires_at: cached.expires_at,
+                });
+            }
+
+            // No cache hit: create repo if needed, then issue token
             await gh.ensureRepoExists(owner, name);
             const tokenResult = await gh.requestToken(scopes, owner);
             await tokenService.cacheToken(
