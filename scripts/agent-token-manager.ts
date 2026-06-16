@@ -25,7 +25,7 @@ interface TokenRecord {
 const cliArgs = process.argv.slice(2);
 const cliCmd = cliArgs[0];
 const isLocal = cliArgs.includes("--local");
-const localFlag = isLocal ? ["--local"] : [];
+const localFlag = isLocal ? ["--local"] : ["--remote"];
 const binding = ["--binding", "KV"];
 
 function help(): void {
@@ -49,9 +49,9 @@ async function runWrangler(
 ): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
         const isWin = process.platform === "win32";
-        const cmd = isWin ? "cmd" : "npx";
+        const cmd = isWin ? "cmd" : "pnpm";
         const args = isWin
-            ? ["/d", "/s", "/c", "npx", "wrangler", "kv", "key", ...wrArgs]
+            ? ["/d", "/s", "/c", "pnpm", "wrangler", "kv", "key", ...wrArgs]
             : ["wrangler", "kv", "key", ...wrArgs];
         const proc = spawn(cmd, args, {
             stdio: ["ignore", "pipe", "pipe"],
