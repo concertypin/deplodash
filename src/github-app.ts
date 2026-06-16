@@ -91,6 +91,23 @@ async function pemToCryptoKey(pem: string): Promise<CryptoKey> {
             throw new Error("PEM? I barely know 'em. Check your key format.");
         base64 = match[1]!.replace(/\s/g, "");
     } else {
+        // Try base64-decode — if the result looks like a PEM header,
+        // the user base64-encoded the entire PEM file into a single env var.
+        let resolved = pem;
+        try {
+            const decoded = atob(pem.replace(/\s/g, ""));
+            if (decoded.startsWith("-----BEGIN")) {
+                resolved = decoded;
+            }
+        } catch {
+            // Not valid base64 — fall through to treat as bare base64 body
+        }
+
+        if (resolved.startsWith("-----BEGIN")) {
+            // Recurse — the decoded PEM still needs header parsing above
+            return pemToCryptoKey(resolved);
+        }
+
         // Assume it's already base64-encoded body (no headers/footers) — for .dev.vars convenience
         base64 = pem.replace(/\s/g, "");
     }
