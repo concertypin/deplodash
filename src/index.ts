@@ -13,6 +13,9 @@ const app = new Hono<HonoEnv>().use("*", logger()).route("/", router);
 
 // ── OpenAPI documentation ─────────────────────────────────────────────────
 
+const { origin } = new URL(import.meta.url);
+const serverUrl = origin.startsWith("http") ? origin : undefined;
+
 app.get(
     "/openapi.json",
     openAPIRouteHandler(app, {
@@ -23,9 +26,9 @@ app.get(
                 description:
                     "Deplodash — GitHub App Token Service. Issue scoped installation tokens for AI agents.",
             },
-            servers: [
-                { url: "http://localhost:5178", description: "Local Server" },
-            ],
+            servers: serverUrl
+                ? [{ url: serverUrl, description: "Deployed Server" }]
+                : [],
         },
     })
 );

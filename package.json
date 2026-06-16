@@ -30,10 +30,11 @@
         "check": "pnpm run format && pnpm run lint && pnpm run test && git add -u",
         "pre-commit": "pnpm run check",
         "test": "vitest run",
-        "deploy": "pnpm run build && wrangler deploy"
+        "deploy": "pnpm run build && wrangler deploy",
+        "token": "node scripts/agent-token-manager.ts"
     },
     "engines": {
-        "node": ">=22.13.0"
+        "node": ">=24"
     },
     "dependencies": {
         "@scalar/hono-api-reference": "^0.10.14",

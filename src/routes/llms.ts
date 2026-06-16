@@ -52,7 +52,7 @@ Request a token for a specific repository with desired permissions.
 \`\`\`json
 {
   "status": "needs_consent",
-  "url": "https://deplodash.example.com/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
+  "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
 }
 \`\`\`
 
@@ -69,7 +69,7 @@ git remote set-url origin https://github.com/owner/repo.git
 # Configure credential helper to fetch tokens from deplodash
 git config credential.helper "!f() {
   echo username=x-access-token
-  echo password=\\$(curl -s -X POST https://deplodash.example.com/api/token \
+  echo password=$(curl -s -X POST {{BASE}}/api/token \
     -H 'Authorization: Bearer YOUR_AGENT_TOKEN' \
     -H 'Content-Type: application/json' \
     -d '{\\"repo\\":\\"owner/repo\\",\\"scopes\\":[\\"contents:write\\"]}' \
@@ -94,8 +94,12 @@ If you encounter permission errors, the agent will receive a \`needs_consent\` r
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at / — paths are relative
 
+const { origin } = new URL(import.meta.url);
+const BASE_URL = origin.startsWith("http") ? origin : "";
+
 export const llmsRouter = new Hono<HonoEnv>().get("/llms.txt", (c) => {
-    return c.text(LLMS_CONTENT, 200, {
+    const content = LLMS_CONTENT.replaceAll("{{BASE}}", BASE_URL);
+    return c.text(content, 200, {
         "Content-Type": "text/plain; charset=utf-8",
     });
 });
