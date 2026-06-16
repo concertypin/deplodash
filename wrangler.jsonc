@@ -8,6 +8,18 @@
     "observability": {
         "enabled": true,
     },
+    "vars": {
+        "GITHUB_CLIENT_ID": "Iv23li3WmDEd5eJbm4fO",
+        "CALLBACK_URL": "https://deplodash.condev.workers.dev/callback",
+        "GITHUB_APP_ID": "4054947",
+    },
+    "secrets": {
+        "required": [
+            "GITHUB_CLIENT_SECRET",
+            "ENCRYPTION_SECRET",
+            "GITHUB_APP_PRIVATE_KEY",
+        ],
+    },
     "kv_namespaces": [
         {
             "binding": "KV",
