@@ -52,7 +52,7 @@ Request a token for a specific repository with desired permissions.
 \`\`\`json
 {
   "status": "needs_consent",
-  "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
+d  "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
 }
 \`\`\`
 
@@ -94,11 +94,10 @@ If you encounter permission errors, the agent will receive a \`needs_consent\` r
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at / — paths are relative
 
-const { origin } = new URL(import.meta.url);
-const BASE_URL = origin.startsWith("http") ? origin : "";
-
 export const llmsRouter = new Hono<HonoEnv>().get("/llms.txt", (c) => {
-    const content = LLMS_CONTENT.replaceAll("{{BASE}}", BASE_URL);
+    const url = new URL(c.req.url);
+    const base = `${url.protocol}//${url.host}`;
+    const content = LLMS_CONTENT.replaceAll("{{BASE}}", base);
     return c.text(content, 200, {
         "Content-Type": "text/plain; charset=utf-8",
     });
