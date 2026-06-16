@@ -23,9 +23,7 @@ app.get(
                 description:
                     "Deplodash — GitHub App Token Service. Issue scoped installation tokens for AI agents.",
             },
-            servers: [
-                { url: "http://localhost:5178", description: "Local Server" },
-            ],
+            servers: [],
         },
     })
 );

@@ -12,7 +12,7 @@ export type Env = {
      */
     GITHUB_CLIENT_SECRET: string;
     /**
-     * Full callback URL for OAuth (e.g. http://localhost:5178/callback).
+     * Full callback URL for OAuth.
      */
     CALLBACK_URL: string;
     /**
