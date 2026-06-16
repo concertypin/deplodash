@@ -16,7 +16,7 @@ export type Env = {
      */
     CALLBACK_URL: string;
     /**
-     * Encryption key for session/SSH-key cookies.
+     * Encryption key for session cookies.
      */
     ENCRYPTION_SECRET: string;
     /**

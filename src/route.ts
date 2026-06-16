@@ -12,14 +12,14 @@ import { llmsRouter } from "@/routes/llms";
  * Root router that composes all sub-routers.
  *
  * Mount point hierarchy:
- *   /          → pages (/, /setup, /register)
+ *   /          → pages (/)
  *   /auth      → auth (OAuth start — /auth/github, /auth/consent)
  *   (root)     → oauth (/callback, /logout)
  *   /api       → API (/api/token)
  *   /llms.txt  → LLM agent documentation
  *
  * sessionMiddleware (cookie decryption) is scoped only to routes that need it
- * — page routes and OAuth routes. v2 token API and /llms.txt
+ * — page routes and OAuth routes. token API and /llms.txt
  * use Bearer token or no auth and don't need cookie-based sessions.
  */
 export const router = new Hono<HonoEnv>()

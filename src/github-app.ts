@@ -181,6 +181,7 @@ export class GitHubApp {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${jwt}`,
+                "User-Agent": "deplodash/1.0",
                 Accept: "application/vnd.github+json",
                 "Content-Type": "application/json",
             },
@@ -228,7 +229,10 @@ export class GitHubApp {
         const checkRes = await fetch(
             `https://api.github.com/repos/${owner}/${repo}`,
             {
-                headers: { Authorization: `Bearer ${adminToken.token}` },
+                headers: {
+                    Authorization: `Bearer ${adminToken.token}`,
+                    "User-Agent": "deplodash/1.0",
+                },
             }
         );
         if (checkRes.status === 200) return true;
@@ -241,7 +245,10 @@ export class GitHubApp {
 
         // 3. Determine if owner is an org or user
         const orgRes = await fetch(`https://api.github.com/orgs/${owner}`, {
-            headers: { Authorization: `Bearer ${adminToken.token}` },
+            headers: {
+                Authorization: `Bearer ${adminToken.token}`,
+                "User-Agent": "deplodash/1.0",
+            },
         });
         const isOrg = orgRes.status === 200;
 
@@ -254,6 +261,7 @@ export class GitHubApp {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${adminToken.token}`,
+                "User-Agent": "deplodash/1.0",
                 "Content-Type": "application/json",
                 Accept: "application/vnd.github+json",
             },

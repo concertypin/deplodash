@@ -34,6 +34,7 @@ pnpm build   # → dist/
 | `GITHUB_CLIENT_SECRET`   | ✅       | GitHub OAuth App client secret                                  |
 | `CALLBACK_URL`           | ✅       | Full OAuth callback URL (dev: `http://localhost:5178/callback`) |
 | `ENCRYPTION_SECRET`      | ✅       | Encryption key for session cookies                              |
+| `KV`                     | ✅       | Cloudflare KV namespace binding                                 |
 | `GITHUB_APP_ID`          | ✅       | GitHub App ID                                                   |
 | `GITHUB_APP_PRIVATE_KEY` | ✅       | PEM-encoded RSA private key for the GitHub App                  |
 | `GITHUB_INSTALLATION_ID` | ✅       | GitHub App Installation ID                                      |

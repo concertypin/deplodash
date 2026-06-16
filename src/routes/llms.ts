@@ -37,7 +37,7 @@ Request a token for a specific repository with desired permissions.
 }
 \`\`\`
 
-**Available scopes:** \`contents:read\`, \`contents:write\`, \`workflows:write\`
+**Available scopes:** \`contents:read\`, \`contents:write\`, \`workflows:write\`, \`admin\`
 
 **Response (ok):**
 \`\`\`json
