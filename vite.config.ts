@@ -34,7 +34,7 @@ const resolve: Config["resolve"] = {
 const testConfig: Config["test"] = {
     coverage: {
         enabled: true,
-        include: ["src/**/*.ts"],
+        include: ["src/**/*.ts", "src/**/*.tsx"],
         provider: "istanbul",
         reportOnFailure: true,
         reporter: ["text", "json-summary", "html"],
@@ -42,7 +42,7 @@ const testConfig: Config["test"] = {
     environment: "node",
     exclude: ignoredDir,
     globals: true,
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
 
     setupFiles: "./tests/setup.ts",
     silent: "passed-only",
@@ -83,6 +83,10 @@ export default defineConfig(() => {
         },
         build: buildConfig,
         clearScreen: false,
+        esbuild: {
+            jsx: "automatic",
+            jsxImportSource: "hono/jsx",
+        },
         resolve,
         test: testConfig,
     } satisfies UserConfig;

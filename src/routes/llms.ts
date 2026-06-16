@@ -52,7 +52,7 @@ Request a token for a specific repository with desired permissions.
 \`\`\`json
 {
   "status": "needs_consent",
-d  "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
+  "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite"
 }
 \`\`\`
 

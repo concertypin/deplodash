@@ -6,6 +6,13 @@ import { getOrInitKey, encryptWith, decryptWith } from "@/crypto";
 import { isSafeRedirect } from "@/helpers";
 import { TokenExpiredError } from "@/errors";
 import { COOKIE_NAME, MAX_AGE_SECS } from "@/middleware";
+import { z } from "zod";
+
+const statePayloadSchema = z.object({
+    v: z.string(),
+    n: z.string().optional(),
+    r: z.string().optional(),
+});
 
 // ─── OAuth callback & logout routes (mounted at root level) ──────────────────
 // These are intentionally NOT under /auth to match the legacy app.
@@ -19,17 +26,15 @@ export const oauthRouter = new Hono<HonoEnv>()
 
         const plain = await decryptWith(key, state);
         if (!plain) return c.text("Invalid state", 400);
-        let payload: { v?: string; n?: string; r?: string };
+        let parsed: unknown;
         try {
-            payload = JSON.parse(plain) as {
-                v?: string;
-                n?: string;
-                r?: string;
-            };
+            parsed = JSON.parse(plain);
         } catch {
             return c.text("Invalid state payload", 400);
         }
-        if (!payload.v) return c.text("Invalid state payload", 400);
+        const result = statePayloadSchema.safeParse(parsed);
+        if (!result.success) return c.text("Invalid state payload", 400);
+        const payload = result.data;
 
         const redirectUri = payload.r || c.env.CALLBACK_URL;
 
@@ -46,11 +51,12 @@ export const oauthRouter = new Hono<HonoEnv>()
             const next = isSafeRedirect(payload.n || "/")
                 ? (payload.n ?? "/")
                 : "/";
+            const isHttps = c.req.url.startsWith("https://");
             setCookie(c, COOKIE_NAME, encryptedToken, {
                 path: "/",
                 httpOnly: true,
                 sameSite: "Lax",
-                secure: true,
+                secure: isHttps,
                 maxAge: MAX_AGE_SECS,
             });
             return c.redirect(next);

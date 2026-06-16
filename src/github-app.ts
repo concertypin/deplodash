@@ -4,7 +4,10 @@
  * Environment variables (via Env bindings):
  *   GITHUB_APP_ID            GitHub App ID (required)
  *   GITHUB_APP_PRIVATE_KEY   PEM-encoded RSA private key (required)
- *   GITHUB_INSTALLATION_ID   Installation ID (required)
+ *
+ * Installation ID is resolved dynamically via the GitHub API:
+ *   - GET /users/{owner}/installation   (for user accounts)
+ *   - GET /orgs/{owner}/installation    (for organizations)
  *
  * Uses Web Crypto API (native in Cloudflare Workers) for RS256 JWT signing.
  */
@@ -23,6 +26,14 @@ const installationTokenResponseSchema = z.object({
     expires_at: z.string(),
     permissions: z.record(z.string(), z.string()),
     repository_selection: z.string(),
+});
+
+/**
+ * Schema for the GitHub App Installation lookup response.
+ */
+const installationSchema = z.object({
+    id: z.number(),
+    account: z.object({ login: z.string() }),
 });
 
 export interface InstallationToken {
@@ -56,8 +67,8 @@ const SCOPE_PRESETS: Record<ScopePreset, Record<string, string>> = {
 export function permissionsFromScopes(
     scopes: string[]
 ): Record<string, string> {
-    const key = [...scopes].sort().join("+") as ScopePreset;
-    if (SCOPE_PRESETS[key]) return { ...SCOPE_PRESETS[key] };
+    const key = [...scopes].sort().join("+");
+    if (key in SCOPE_PRESETS) return { ...SCOPE_PRESETS[key as ScopePreset] };
     const perms: Record<string, string> = { metadata: "read" };
     for (const s of scopes) {
         if (s === "contents:read") perms.contents = "read";
@@ -271,32 +282,129 @@ async function signJwt(privateKey: CryptoKey, appId: string): Promise<string> {
 
 export class GitHubApp {
     private appId: string;
-    private installationId: string;
-    private keyPromise: Promise<CryptoKey>;
+    private privateKeyPem: string;
+    private keyPromise: Promise<CryptoKey> | null = null;
+    /** Cached installation ID per owner (in-memory, per-request). */
+    private installationCache: Map<string, string> = new Map();
 
-    constructor(appId: string, installationId: string, privateKeyPem: string) {
+    constructor(appId: string, privateKeyPem: string) {
         this.appId = appId;
-        this.installationId = installationId;
-        this.keyPromise = pemToCryptoKey(privateKeyPem);
+        this.privateKeyPem = privateKeyPem;
+    }
+
+    /**
+     * Lazily parse the PEM key and return the CryptoKey.
+     * The actual parsing is deferred until first use, so that creating a
+     * GitHubApp instance does not eagerly reject on invalid keys.
+     */
+    private async getKey(): Promise<CryptoKey> {
+        if (!this.keyPromise) {
+            this.keyPromise = pemToCryptoKey(this.privateKeyPem);
+        }
+        return this.keyPromise;
     }
 
     /**
      * Sign a fresh JWT (10 min expiry).
-     * No caching needed — each HTTP request creates a new GitHubApp instance.
      */
     private async getJwt(): Promise<string> {
-        const key = await this.keyPromise;
+        const key = await this.getKey();
         return signJwt(key, this.appId);
     }
 
     /**
-     * Exchange the App JWT for an Installation Token scoped to the given permissions.
+     * Resolve the installation ID for a given repository owner (user or org).
+     *
+     * Calls the GitHub API to find the installation:
+     *   - GET /users/{owner}/installation  (for user accounts)
+     *   - GET /orgs/{owner}/installation   (for organizations)
+     *
+     * Falls back from org to user lookup automatically.
+     *
+     * @param owner - The GitHub owner (user or org) to find an installation for.
+     * @returns The installation ID as a string.
+     * @throws Error if no installation is found for the owner.
+     */
+    async resolveInstallationId(owner: string): Promise<string> {
+        // Check in-memory cache first
+        const cached = this.installationCache.get(owner);
+        if (cached) return cached;
+
+        const jwt = await this.getJwt();
+        const headers = {
+            Authorization: `Bearer ${jwt}`,
+            "User-Agent": "deplodash/1.0",
+            Accept: "application/vnd.github+json",
+        };
+
+        // Try org installation first, then user
+        let installationId: string | null = null;
+
+        // Try org
+        const orgUrl = `https://api.github.com/orgs/${owner}/installation`;
+        const orgRes = await fetch(orgUrl, { headers });
+
+        if (orgRes.status === 200) {
+            const data = installationSchema.parse(await orgRes.json());
+            installationId = String(data.id);
+        } else if (orgRes.status === 404) {
+            // Not an org — try user installation
+            const userUrl = `https://api.github.com/users/${owner}/installation`;
+            const userRes = await fetch(userUrl, { headers });
+
+            if (userRes.status === 200) {
+                const data = installationSchema.parse(await userRes.json());
+                installationId = String(data.id);
+            } else if (userRes.status === 404) {
+                throw new Error(
+                    `GitHub App is not installed for "${owner}". ` +
+                        "Please install the app first: " +
+                        `https://github.com/apps/${this.appId}/installations/new`
+                );
+            } else {
+                const body = await userRes.text().catch(() => "");
+                throw new Error(
+                    `Failed to check user installation for "${owner}": ${userRes.status} ${body.slice(0, 200)}`
+                );
+            }
+        } else {
+            const body = await orgRes.text().catch(() => "");
+            throw new Error(
+                `Failed to check org installation for "${owner}": ${orgRes.status} ${body.slice(0, 200)}`
+            );
+        }
+
+        if (!installationId) {
+            throw new Error(
+                `Could not resolve installation ID for "${owner}".`
+            );
+        }
+
+        // Cache for this request
+        this.installationCache.set(owner, installationId);
+        return installationId;
+    }
+
+    /**
+     * Exchange the App JWT for an Installation Token scoped to the given
+     * permissions, using the provided installation ID.
+     *
+     * @param permissions - GitHub API permissions object.
+     * @param installationId - The GitHub App installation ID to request a token from.
      */
     async getInstallationToken(
-        permissions: Record<string, string>
+        permissions: Record<string, string>,
+        installationId?: string
     ): Promise<InstallationToken> {
+        const installId = installationId;
+        if (!installId) {
+            throw new Error(
+                "No installation ID available. Call resolveInstallationId first."
+            );
+        }
+
         const jwt = await this.getJwt();
-        const url = `https://api.github.com/app/installations/${this.installationId}/access_tokens`;
+        const url = `https://api.github.com/app/installations/${installId}/access_tokens`;
         const res = await fetch(url, {
             method: "POST",
             headers: {
@@ -325,25 +433,36 @@ export class GitHubApp {
     }
 
     /**
-     * Request an installation token for a specific set of scope strings.
-     * Convenience wrapper around getInstallationToken.
+     * Request an installation token for a specific set of scope strings and owner.
+     * Convenience wrapper that resolves the installation ID and requests a token.
+     *
+     * @param scopes - Scope strings to include.
+     * @param owner - The repo owner (used to resolve installation dynamically).
      */
-    async requestToken(scopes: string[]): Promise<InstallationToken> {
+    async requestToken(
+        scopes: string[],
+        owner: string
+    ): Promise<InstallationToken> {
         const perms = permissionsFromScopes(scopes);
-        return this.getInstallationToken(perms);
+        const installationId = await this.resolveInstallationId(owner);
+        return this.getInstallationToken(perms, installationId);
     }
 
     /**
      * Ensure a repository exists. If it doesn't, create it using the
      * GitHub App installation's admin permissions.
      *
+     * Dynamically resolves the installation ID for the given owner.
+     *
      * @returns true if the repo already existed or was created successfully.
      */
     async ensureRepoExists(owner: string, repo: string): Promise<boolean> {
-        // 1. Get installation token with admin permission
-        const adminToken = await this.getInstallationToken({
-            administration: "write",
-        });
+        // 1. Resolve installation and get installation token with admin permission
+        const installationId = await this.resolveInstallationId(owner);
+        const adminToken = await this.getInstallationToken(
+            { administration: "write" },
+            installationId
+        );
 
         // 2. Check if repo already exists
         const checkRes = await fetch(
@@ -388,7 +507,7 @@ export class GitHubApp {
             body: JSON.stringify({
                 name: repo,
                 private: true,
-                auto_init: false,
+                auto_init: true,
             }),
         });
 

@@ -4,7 +4,7 @@ import { decryptWith, getOrInitKey } from "@/crypto";
 import type { HonoEnv } from "@/types";
 import { GitHubClient } from "@/github";
 import { isSafeRedirect } from "@/helpers";
-import { renderLoginPage } from "@/html";
+import { LoginPage, renderPage } from "@/views";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ export function authGuard(): MiddlewareHandler<HonoEnv> {
             const target = url.pathname + url.search;
             const safeNext = isSafeRedirect(target) ? target : "/";
             const redirectUrl = `/auth/github?next=${encodeURIComponent(safeNext)}`;
-            return c.html(renderLoginPage(redirectUrl));
+            return c.html(renderPage(<LoginPage redirectUrl={redirectUrl} />));
         }
         c.set("client", new GitHubClient(token));
         await next();

@@ -37,8 +37,8 @@ pnpm build   # → dist/
 | `KV`                     | ✅       | Cloudflare KV namespace binding                                 |
 | `GITHUB_APP_ID`          | ✅       | GitHub App ID                                                   |
 | `GITHUB_APP_PRIVATE_KEY` | ✅       | PEM-encoded RSA private key for the GitHub App                  |
-| `GITHUB_INSTALLATION_ID` | ✅       | GitHub App Installation ID                                      |
-| `GITHUB_TOKEN`           | ❌       | Direct PAT — skips OAuth (dev/testing only)                     |
+
+| `GITHUB_TOKEN` | ❌ | Direct PAT — skips OAuth (dev/testing only) |
 
 ## How It Works
 
@@ -127,7 +127,6 @@ npx wrangler secret put CALLBACK_URL
 npx wrangler secret put ENCRYPTION_SECRET
 npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY
-npx wrangler secret put GITHUB_INSTALLATION_ID
 
 # Update KV namespace ID in wrangler.jsonc, then deploy
 npx wrangler deploy
