@@ -69,61 +69,164 @@ export function permissionsFromScopes(
 }
 
 // ─── PEM → CryptoKey ─────────────────────────────────────────────────────────
-
 /**
  * Parse a PEM-encoded RSA private key and import it as a CryptoKey for RS256 signing.
  *
- * Accepts two formats:
- *   1. Raw PEM (-----BEGIN ... -----) — multiline or single-line, with or without headers.
- *   2. Base64-encoded body only — single line, handy for `.dev.vars` which doesn't support multiline values.
+ * Accepts the following input formats (auto-detected):
+ *   1. Raw PEM text — PKCS#8 (`BEGIN PRIVATE KEY`) or PKCS#1 (`BEGIN RSA PRIVATE KEY`)
+ *   2. Base64-encoded PEM — entire PEM file encoded as a single base64 string
+ *      (handy for `.dev.vars` / environment variables that don't support multilines)
+ *   3. Bare base64 body — no PEM headers/footers, just the raw DER bytes in base64
+ *      (assumed PKCS#8; wrap in PEM headers if you have a PKCS#1 bare body)
  *
- * Auto-detects by checking if the input starts with "-----BEGIN".
+ * PKCS#1 keys are automatically converted to PKCS#8 in-memory — no openssl needed.
  */
-async function pemToCryptoKey(pem: string): Promise<CryptoKey> {
-    let base64: string;
-    if (pem.startsWith("-----BEGIN")) {
-        // Raw PEM — extract base64 body, ignoring header attributes like Proc-Type, DEK-Info etc.
-        const match =
-            /-----BEGIN\s+[\w-]+-----\s*(?:(?:[\w-]+:\s*[^\n]*\n)*\n?\s*)?([A-Za-z0-9+/=\s]+)\s*-----END\s+[\w-]+-----/.exec(
-                pem
-            );
-        if (!match)
-            throw new Error("PEM? I barely know 'em. Check your key format.");
-        base64 = match[1]!.replace(/\s/g, "");
-    } else {
-        // Try base64-decode — if the result looks like a PEM header,
-        // the user base64-encoded the entire PEM file into a single env var.
-        let resolved = pem;
-        try {
-            const decoded = atob(pem.replace(/\s/g, ""));
-            if (decoded.startsWith("-----BEGIN")) {
-                resolved = decoded;
-            }
-        } catch {
-            // Not valid base64 — fall through to treat as bare base64 body
-        }
+export async function pemToCryptoKey(pem: string): Promise<CryptoKey> {
+    const { der, isPkcs1 } = extractDer(pem.trim());
 
-        if (resolved.startsWith("-----BEGIN")) {
-            // Recurse — the decoded PEM still needs header parsing above
-            return pemToCryptoKey(resolved);
-        }
-
-        // Assume it's already base64-encoded body (no headers/footers) — for .dev.vars convenience
-        base64 = pem.replace(/\s/g, "");
-    }
-    const raw = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    return await crypto.subtle.importKey(
+    const pkcs8Der = isPkcs1 ? pkcs1ToPkcs8(der) : der;
+    return crypto.subtle.importKey(
         "pkcs8",
-        raw,
-        {
-            name: "RSASSA-PKCS1-v1_5",
-            hash: { name: "SHA-256" },
-        },
+        pkcs8Der,
+        { name: "RSASSA-PKCS1-v1_5", hash: { name: "SHA-256" } },
         false,
         ["sign"]
     );
 }
 
+type DerResult = { der: Uint8Array<ArrayBuffer>; isPkcs1: boolean };
+
+/**
+ * Extract raw DER bytes and key format from any supported input.
+ */
+function extractDer(input: string): DerResult {
+    // Case 1: raw PEM text
+    if (input.startsWith("-----BEGIN")) {
+        return parsePem(input);
+    }
+
+    // Case 2: base64-encoded PEM (entire file as one env var)
+    const decoded = tryBase64Decode(input);
+    if (decoded !== null && decoded.startsWith("-----BEGIN")) {
+        return parsePem(decoded);
+    }
+
+    // Case 3: bare base64 DER body (assumed PKCS#8)
+    if (/^[A-Za-z0-9+/=\s]+$/.test(input)) {
+        return { der: base64ToDer(input.replace(/\s/g, "")), isPkcs1: false };
+    }
+
+    throw new Error(
+        "Unrecognised key format. Expected: PEM text, base64-encoded PEM, or bare base64 DER body."
+    );
+}
+
+/**
+ * Parse a PEM string and return its DER bytes + format flag.
+ * Handles both PKCS#8 (`BEGIN PRIVATE KEY`) and PKCS#1 (`BEGIN RSA PRIVATE KEY`).
+ */
+function parsePem(pem: string): DerResult {
+    const lines = pem.split(/\r?\n/);
+    const header = lines.find((l) => l.startsWith("-----BEGIN")) ?? "";
+    const isPkcs1 = header.includes("RSA PRIVATE KEY");
+
+    const bodyLines = lines.filter(
+        (line) =>
+            !line.startsWith("-----") &&
+            !line.includes(":") && // inline attrs: Proc-Type, DEK-Info, …
+            line.trim() !== ""
+    );
+
+    if (bodyLines.length === 0) {
+        throw new Error(
+            "PEM body is empty — the key may be encrypted or malformed."
+        );
+    }
+
+    return { der: base64ToDer(bodyLines.join("")), isPkcs1 };
+}
+
+/**
+ * Wrap a PKCS#1 RSA private key DER buffer in a PKCS#8 envelope.
+ *
+ * PKCS#8 unencrypted structure (RFC 5208):
+ *   SEQUENCE {
+ *     INTEGER 0                          -- version
+ *     SEQUENCE { OID rsaEncryption NULL }  -- algorithm
+ *     OCTET STRING { <pkcs1Der> }        -- privateKey
+ *   }
+ *
+ * The OID + surrounding structure is always identical for RSA,
+ * so we can prepend a fixed header rather than doing full ASN.1 encoding.
+ */
+function pkcs1ToPkcs8(pkcs1Der: Uint8Array): Uint8Array<ArrayBuffer> {
+    // Fixed ASN.1 prefix for PKCS#8 RSA private key wrapper:
+    //   30 xx           SEQUENCE (outer) — length patched below
+    //     02 01 00      INTEGER 0 (version)
+    //     30 0d         SEQUENCE (algorithmIdentifier)
+    //       06 09 ...   OID 1.2.840.113549.1.1.1 (rsaEncryption)
+    //       05 00       NULL
+    //     04 xx xx      OCTET STRING — length patched below
+    const oidAndAlg = new Uint8Array([
+        0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+        0x01, 0x05, 0x00,
+    ]);
+    const version = new Uint8Array([0x02, 0x01, 0x00]);
+
+    const octetStringHeader = encodeAsn1Length(0x04, pkcs1Der.length);
+    const innerLen =
+        version.length +
+        oidAndAlg.length +
+        octetStringHeader.length +
+        pkcs1Der.length;
+    const outerHeader = encodeAsn1Length(0x30, innerLen);
+
+    const out = new Uint8Array(
+        outerHeader.length +
+            version.length +
+            oidAndAlg.length +
+            octetStringHeader.length +
+            pkcs1Der.length
+    );
+    let offset = 0;
+    for (const chunk of [
+        outerHeader,
+        version,
+        oidAndAlg,
+        octetStringHeader,
+        pkcs1Der,
+    ]) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return out;
+}
+
+/**
+ * Encode an ASN.1 tag + DER length prefix.
+ * Handles short form (< 128) and long form (multi-byte length).
+ */
+function encodeAsn1Length(tag: number, length: number): Uint8Array {
+    if (length < 0x80) {
+        return new Uint8Array([tag, length]);
+    }
+    if (length < 0x100) {
+        return new Uint8Array([tag, 0x81, length]);
+    }
+    return new Uint8Array([tag, 0x82, (length >> 8) & 0xff, length & 0xff]);
+}
+
+function tryBase64Decode(input: string): string | null {
+    try {
+        return atob(input.replace(/\s/g, ""));
+    } catch {
+        return null;
+    }
+}
+
+function base64ToDer(base64: string): Uint8Array<ArrayBuffer> {
+    return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
 // ─── JWT Helpers ─────────────────────────────────────────────────────────────
 
 function base64UrlEncode(data: ArrayBuffer | Uint8Array): string {
