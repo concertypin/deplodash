@@ -29,7 +29,7 @@ The config lives in `oxlint.config.ts`.
 When using new plugins, try oxlint's plugin compatibility docs first.
 
 - Make a config in the `scripts/linter/` directory for the plugin.
-- Write the rules you want to use in that config.
+- Write the rules you want to use in that config, splitting error-level and warn-level rules into separate files (`oxlint-typescript-error.ts` / `oxlint-typescript-warn.ts`) if desired.
 - Extend `scripts/linter/oxlint-typescript.ts` with the config you made.
 
 If the plugin needs JS plugin support, add it in `oxlint.config.ts` with `jsPlugins` instead of bringing ESLint back.

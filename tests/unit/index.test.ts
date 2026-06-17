@@ -10,6 +10,9 @@ const MIN_ENV: HonoEnv["Bindings"] = {
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
+    GITHUB_APP_ID: "123456",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
 };
 
 const client = testClient(app, MIN_ENV);

@@ -28,13 +28,13 @@ export type Env = {
      */
     KV: KVNamespace;
     /**
-     * GitHub App ID (required for v2 token service).
+     * GitHub App ID (required for token issuance).
      */
-    GITHUB_APP_ID?: string;
+    GITHUB_APP_ID: string;
     /**
-     * PEM-encoded RSA private key for the GitHub App (required for v2).
+     * PEM-encoded RSA private key for the GitHub App (required for token issuance).
      */
-    GITHUB_APP_PRIVATE_KEY?: string;
+    GITHUB_APP_PRIVATE_KEY: string;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────

@@ -408,6 +408,9 @@ describe("GET / (pages)", () => {
             CALLBACK_URL: "http://localhost:5178/callback",
             KV: env.KV,
             GITHUB_TOKEN: "ghp_test_user_token",
+            GITHUB_APP_ID: "123456",
+            GITHUB_APP_PRIVATE_KEY:
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
         };
         const app = new Hono<HonoEnv>().route("/", pagesRouter);
         const client = testClient(app, authEnv);
@@ -458,6 +461,9 @@ describe("GET / (pages)", () => {
             CALLBACK_URL: "http://localhost:5178/callback",
             KV: env.KV,
             GITHUB_TOKEN: "ghp_test_user_token",
+            GITHUB_APP_ID: "123456",
+            GITHUB_APP_PRIVATE_KEY:
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
         };
         const app = new Hono<HonoEnv>().route("/", pagesRouter);
         const client = testClient(app, authEnv);
@@ -483,6 +489,9 @@ describe("GET / (pages)", () => {
             CALLBACK_URL: "http://localhost:5178/callback",
             KV: env.KV,
             GITHUB_TOKEN: "ghp_test_user_token",
+            GITHUB_APP_ID: "123456",
+            GITHUB_APP_PRIVATE_KEY:
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
         };
         const app = new Hono<HonoEnv>().route("/", pagesRouter);
         const client = testClient(app, authEnv);
@@ -506,6 +515,9 @@ describe("GET / (pages)", () => {
             CALLBACK_URL: "http://localhost:5178/callback",
             KV: env.KV,
             GITHUB_TOKEN: "ghp_test_user_token",
+            GITHUB_APP_ID: "123456",
+            GITHUB_APP_PRIVATE_KEY:
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
         };
         const app = new Hono<HonoEnv>().route("/", pagesRouter);
         const client = testClient(app, authEnv);
@@ -719,6 +731,8 @@ describe("POST /api/token (without GitHub App configured)", () => {
             GITHUB_CLIENT_SECRET: "test-secret",
             CALLBACK_URL: "http://localhost:5178/callback",
             KV: env.KV,
+            GITHUB_APP_ID: "",
+            GITHUB_APP_PRIVATE_KEY: "",
         };
         const app = new Hono<HonoEnv>().route("/api", tokenRouter);
         const client = testClient(app, noAppEnv);

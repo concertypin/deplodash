@@ -13,51 +13,13 @@ repository, deplodash creates it automatically.
 
 ## Architecture
 
-```
-src/
-  index.ts           — App entry: CORS, route mounting, OpenAPI/Scalar docs
-  route.ts           — Root router: composes all sub-routers with session middleware
-  types.ts           — Env bindings, GitHub API types, v2 types
-  errors.ts          — Custom error classes (TokenExpiredError)
-  crypto.ts          — AES-256-GCM encrypt/decrypt, PKCE challenge, base64url
-  helpers.ts         — Pure utilities (escapeHtml, parseRepo, isSafeRedirect, hashScopes)
-  github.ts          — GitHub OAuth API client (user lookup, repos, OAuth exchange)
-  github-app.ts      — GitHub App JWT signing + dynamic Installation Token issuance + repo creation
-  token-service.ts   — Cloudflare KV consent management + token caching + list/revoke
-  middleware.tsx     — Session cookie decryption, auth guard
-  html.ts            — (deprecated) migrated to TSX views
-  views/             — Hono JSX (TSX) page components
-    Layout.tsx       — Base HTML layout + renderPage() helper
-    LoginPage.tsx    — Login page with GitHub OAuth button
-    HomePage.tsx     — Dashboard with consent list + revoke buttons
-    ConsentPage.tsx  — Agent consent approval form
-    Navbar.tsx       — Top navigation bar
-    Sidebar.tsx      — Side navigation drawer
-    index.ts         — Barrel exports
-  middleware/
-    agent-auth.ts    — Bearer token auth middleware for agents
-  routes/
-    auth.ts          — GET /auth/github (PKCE OAuth start)
-    oauth.ts         — GET /callback, GET /logout
-    pages.tsx        — GET / (home/dashboard with consent list)
-    api.ts           — (empty) legacy v1 API placeholder
-    consent.tsx      — GET/POST /auth/consent + POST /auth/revoke
-    token.ts         — POST /api/token — agent token endpoint (with auto-create)
-    llms.ts          — GET /llms.txt — agent documentation
-  utils/
-    cors.ts          — CORS middleware
-tests/               — Vitest test suite (178 tests, 96%+ coverage)
-  helpers.ts         — Shared test utilities (strictMock)
-  unit/
-    errors.test.ts   — TokenExpiredError tests
-    views.test.tsx   — TSX component rendering tests
-    github.test.ts   — GitHubClient fetch mock tests
-    agent-auth.test.ts — Agent token auth tests
-    oauth.test.ts    — OAuth flow tests
-    github-app.test.ts — Dynamic installation resolution tests
-    token-service.test.ts — Consent + cache + list + revoke tests
-    routes-v2.test.ts — Full route integration tests
-```
+- **`src/`** — Application source (Hono on Cloudflare Workers)
+    - **`routes/`** — Route handlers (token, consent, auth, oauth, pages, llms)
+    - **`views/`** — Hono JSX (TSX) page components (Layout, LoginPage, HomePage, ConsentPage, Navbar, Sidebar)
+    - **`middleware/`** — Session cookie auth, Bearer token auth for agents
+    - Core modules: `crypto.ts`, `github-app.ts`, `github.ts`, `token-service.ts`, `helpers.ts`, `types.ts`, `errors.ts`
+    - Utilities: `cors.ts`
+- **`tests/`** — Vitest test suite (180+ tests, 95%+ coverage)
 
 ## Environment Variables
 
@@ -127,6 +89,6 @@ Configuration is in `wrangler.jsonc`.
 - **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop for admin tools.
 - **OpenAPI spec incomplete** — `POST /api/token`, `POST /auth/consent` and auth endpoints lack proper OpenAPI response schemas. See `TODO.md`.
 - **Agent token management** — No admin UI or API to register/revoke agent tokens. Currently must be done via direct KV writes or wrangler.
-- **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` does not handle `kv.list()` cursor pagination. At most 1000 consent records returned.
+- **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` batches KV gets (50 at a time) for performance but still does not handle `kv.list()` cursor-based pagination. At most 1000 consent records returned per page.
 - **`github-app.ts` `resolveInstallationId`** — Does not cache installation IDs across requests. Each request to a different owner triggers a fresh GitHub API call. Consider adding KV-based caching with TTL.
 - **`api.ts`** — Empty legacy v1 API placeholder. Consider removing if not needed.

@@ -22,7 +22,7 @@ pnpm install
 cp .dev.vars.example .dev.vars
 
 pnpm dev     # → http://localhost:5178
-pnpm test    # 48+ tests
+pnpm test    # 180+ tests
 pnpm build   # → dist/
 ```
 
@@ -34,38 +34,40 @@ pnpm build   # → dist/
 | `GITHUB_CLIENT_SECRET`   | ✅       | GitHub OAuth App client secret                                  |
 | `CALLBACK_URL`           | ✅       | Full OAuth callback URL (dev: `http://localhost:5178/callback`) |
 | `ENCRYPTION_SECRET`      | ✅       | Encryption key for session cookies                              |
-| `KV`                     | ✅       | Cloudflare KV namespace binding                                 |
 | `GITHUB_APP_ID`          | ✅       | GitHub App ID                                                   |
 | `GITHUB_APP_PRIVATE_KEY` | ✅       | PEM-encoded RSA private key for the GitHub App                  |
-
-| `GITHUB_TOKEN` | ❌ | Direct PAT — skips OAuth (dev/testing only) |
+| `GITHUB_TOKEN`           | ❌       | Direct PAT — skips OAuth (dev/testing only)                     |
 
 ## How It Works
 
-```
-┌──────────┐     POST /api/token      ┌────────────┐     GitHub API    ┌──────────┐
-│ AI Agent │  ────────────────────────▶│ Deplodash  │──────────────────▶│  GitHub  │
-│          │◀─────────────────────────│ (Worker)   │◀──────────────────│          │
-└──────────┘   Installation Token      └────────────┘                  └──────────┘
-                     ▲                        │
-                     │            ┌───────────┴──────────┐
-                     │            │  Cloudflare KV        │
-                     │            │  • Agent tokens       │
-                     │            │  • Consent records    │
-                     │            │  • Token cache        │
-                     │            └───────────────────────┘
-                     │
-                ┌────┴────┐
-                │  User   │  (approves via /auth/consent)
-                └─────────┘
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent
+    participant W as Deplodash (Worker)
+    participant KV as Cloudflare KV
+    participant User as User
+    participant GH as GitHub API
+
+    Agent->>W: POST /api/token<br/>(Bearer token, repo, scopes)
+    W->>KV: Check consent
+    alt No consent
+        W-->>Agent: 202 needs_consent + URL
+        User->>W: GET /auth/consent (approves)
+        W->>KV: Store consent
+        Agent->>W: POST /api/token (retry)
+    end
+    W->>GH: Create repo (if missing)<br/>Request installation token
+    GH-->>W: Installation Token
+    W->>KV: Cache token
+    W-->>Agent: 200 { token, expires_at }
+    Agent->>GH: git push / API calls
 ```
 
 1. **Agent** sends `POST /api/token` with a pre-provisioned Bearer token, repo, and scope
-2. **Deplodash** checks if the repo exists → creates it if missing
-3. **Deplodash** checks consent in KV → if not yet approved, returns a consent URL
-4. **User** visits the consent URL, logs in via OAuth, and approves access
-5. **Agent** retries, gets a scoped GitHub Installation Token
-6. **Agent** uses the token for `git push` or GitHub API calls
+2. **Deplodash** checks consent in KV → if not yet approved, returns a consent URL
+3. **User** visits the consent URL, logs in via OAuth, and approves access
+4. **Agent** retries, gets a scoped GitHub Installation Token (repo is auto-created if missing)
+5. **Agent** uses the token for `git push` or GitHub API calls
 
 ## API
 
@@ -96,40 +98,21 @@ Only needed for the consent page authentication:
 
 ## Architecture
 
-```
-src/
-  index.ts       → CORS, route mounting, OpenAPI/Scalar docs
-  route.ts       → Root router with session middleware
-  crypto.ts      → AES-256-GCM encrypt/decrypt (PBKDF2 derived)
-  github-app.ts  → GitHub App JWT signing + Installation Token issuance
-  token-service.ts → KV consent management + token caching
-  helpers.ts     → Utility functions
-  html.ts        → SSR HTML templates (DaisyUI + Lucide icons)
-  middleware.ts  → Session cookie decryption, auth guard
-  middleware/
-    agent-auth.ts → Bearer token auth middleware
-  routes/
-    token.ts     → POST /api/token (with auto-repo-creation)
-    consent.ts   → GET/POST /auth/consent
-    auth.ts      → GET /auth/github (PKCE OAuth start)
-    oauth.ts     → GET /callback, GET /logout
-    pages.ts     → GET / (home page)
-    llms.ts      → GET /llms.txt
-```
+See [`AGENTS.md`](./AGENTS.md) for the full module reference.
 
 ## Deploy
 
 ```sh
 # Set secrets (one-time)
-npx wrangler secret put GITHUB_CLIENT_ID
-npx wrangler secret put GITHUB_CLIENT_SECRET
-npx wrangler secret put CALLBACK_URL
-npx wrangler secret put ENCRYPTION_SECRET
-npx wrangler secret put GITHUB_APP_ID
-npx wrangler secret put GITHUB_APP_PRIVATE_KEY
+pnpm exec wrangler secret put GITHUB_CLIENT_ID
+pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
+pnpm exec wrangler secret put CALLBACK_URL
+pnpm exec wrangler secret put ENCRYPTION_SECRET
+pnpm exec wrangler secret put GITHUB_APP_ID
+pnpm exec wrangler secret put GITHUB_APP_PRIVATE_KEY
 
 # Update KV namespace ID in wrangler.jsonc, then deploy
-npx wrangler deploy
+pnpm deploy
 ```
 
 ## License
