@@ -84,7 +84,7 @@ export class GitHubClient {
             body: JSON.stringify({
                 name,
                 private: isPrivate,
-                auto_init: false,
+                auto_init: true,
             }),
         });
     }

@@ -35,10 +35,6 @@ export type Env = {
      * PEM-encoded RSA private key for the GitHub App (required for v2).
      */
     GITHUB_APP_PRIVATE_KEY?: string;
-    /**
-     * GitHub App Installation ID (required for v2).
-     */
-    GITHUB_INSTALLATION_ID?: string;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────
@@ -103,8 +99,25 @@ export type ScopePreset =
 
 /**
  * A consent record stored in KV.
+ * Stored under key `consent:${repo}:${scopesHash}`.
  */
 export type ConsentRecord = {
+    /** Repository full name (owner/repo). */
+    repo: string;
+    /** Comma-separated scope list as stored. */
+    scopes: string;
+    /** ISO 8601 timestamp of when consent was granted. */
+    granted_at: string;
+    /** Optional: the agent_id that requested the consent. */
+    agent_id?: string;
+};
+
+/**
+ * A consent record with its KV key info, for dashboard display.
+ */
+export type ConsentEntry = {
+    repo: string;
+    scopes: string;
     granted_at: string;
 };
 

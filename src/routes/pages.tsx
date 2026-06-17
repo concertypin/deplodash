@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
-import { renderHomePage } from "@/html";
+import { TokenService } from "@/token-service";
+import { renderPage, HomePage } from "@/views";
+import type { ConsentItem } from "@/views";
+import { escapeHtml } from "@/helpers";
 
 // ─── Page Routes ─────────────────────────────────────────────────────────────
 // Mounted at / — paths are /
@@ -15,11 +18,19 @@ export const pagesRouter = new Hono<HonoEnv>()
         try {
             // Fetch user info for the welcome page
             const user = await client.getUser();
+
+            // Fetch consent list for the dashboard
+            const tokenService = new TokenService(c.env.KV);
+            const consents: ConsentItem[] = await tokenService.listConsents();
+
             return c.html(
-                renderHomePage({
-                    login: user.login,
-                    avatarUrl: user.avatar_url,
-                })
+                renderPage(
+                    <HomePage
+                        login={user.login}
+                        avatarUrl={user.avatar_url}
+                        consents={consents}
+                    />
+                )
             );
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -28,12 +39,3 @@ export const pagesRouter = new Hono<HonoEnv>()
             );
         }
     });
-
-function escapeHtml(s: string): string {
-    return s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}

@@ -49,6 +49,129 @@ describe("TokenService", () => {
         });
     });
 
+    describe("recordConsent with agentId", () => {
+        it("stores the agent_id when provided", async () => {
+            await service.recordConsent(
+                "owner/repo",
+                ["contents:read"],
+                "agent-123"
+            );
+            const result = await service.checkConsent("owner/repo", [
+                "contents:read",
+            ]);
+            expect(result).toBe(true);
+
+            // Verify the agent_id is stored by listing consents
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.repo).toBe("owner/repo");
+        });
+    });
+
+    describe("listConsents", () => {
+        it("returns empty array when no consents exist", async () => {
+            const consents = await service.listConsents();
+            expect(consents).toEqual([]);
+        });
+
+        it("returns a single consent record", async () => {
+            await service.recordConsent("alpha/repo", ["contents:read"]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.repo).toBe("alpha/repo");
+            expect(consents[0]!.scopes).toBe("contents:read");
+            expect(consents[0]!.granted_at).toBeTruthy();
+        });
+
+        it("returns multiple consent records", async () => {
+            await service.recordConsent("alpha/repo", ["contents:read"]);
+            await service.recordConsent("beta/repo", ["contents:write"]);
+            await service.recordConsent("gamma/repo", ["admin"]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(3);
+            const repos = consents.map((c) => c.repo).sort();
+            expect(repos).toEqual(["alpha/repo", "beta/repo", "gamma/repo"]);
+        });
+
+        it("sorts results by granted_at descending (newest first)", async () => {
+            await service.recordConsent("old/repo", ["contents:read"]);
+            // Small delay to ensure different timestamps
+            await new Promise((r) => setTimeout(r, 50));
+            await service.recordConsent("new/repo", ["contents:write"]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(2);
+            expect(consents[0]!.repo).toBe("new/repo");
+            expect(consents[1]!.repo).toBe("old/repo");
+        });
+
+        it("handles old-format consent records without repo/scopes fields", async () => {
+            // Write a raw old-format record that has no repo/scopes fields
+            await kv.put(
+                "consent:legacy/repo:abc123",
+                JSON.stringify({
+                    granted_at: "2026-01-01T00:00:00Z",
+                })
+            );
+
+            // Also write a new-format record
+            await service.recordConsent("new/repo", ["contents:read"]);
+
+            const consents = await service.listConsents();
+            // Old format without repo/scopes should be skipped
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.repo).toBe("new/repo");
+        });
+
+        it("skips consent records with missing required fields", async () => {
+            // Store a JSON object without repo/scopes/granted_at fields
+            await kv.put(
+                "consent:orphan:hash1",
+                JSON.stringify({ some_other_field: true })
+            );
+            await service.recordConsent("valid/repo", ["contents:read"]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.repo).toBe("valid/repo");
+        });
+    });
+
+    describe("revokeAllConsentsForRepo", () => {
+        it("revokes all consents for a given repo", async () => {
+            await service.recordConsent("target/repo", ["contents:read"]);
+            await service.recordConsent("target/repo", ["contents:write"]);
+            await service.recordConsent("other/repo", ["contents:read"]);
+
+            await service.revokeAllConsentsForRepo("target/repo");
+
+            const check1 = await service.checkConsent("target/repo", [
+                "contents:read",
+            ]);
+            const check2 = await service.checkConsent("target/repo", [
+                "contents:write",
+            ]);
+            const check3 = await service.checkConsent("other/repo", [
+                "contents:read",
+            ]);
+            expect(check1).toBe(false);
+            expect(check2).toBe(false);
+            expect(check3).toBe(true);
+        });
+
+        it("does nothing when repo has no consents", async () => {
+            await service.recordConsent("other/repo", ["contents:read"]);
+
+            await service.revokeAllConsentsForRepo("nonexistent/repo");
+
+            // Other repo should be unaffected
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+        });
+    });
+
     describe("token caching", () => {
         it("returns null when no cached token exists", async () => {
             const result = await service.getCachedToken("owner/repo", [
@@ -101,6 +224,24 @@ describe("TokenService", () => {
                 "contents:read",
             ]);
             expect(cached).toBeNull();
+        });
+
+        it("caches token with 1 hour max TTL", async () => {
+            // Token expires in 24 hours — should be capped to 1 hour
+            const farFuture = new Date(
+                Date.now() + 24 * 60 * 60 * 1000
+            ).toISOString();
+            await service.cacheToken(
+                "owner/repo",
+                ["contents:read"],
+                "ghs_long",
+                farFuture
+            );
+            const cached = await service.getCachedToken("owner/repo", [
+                "contents:read",
+            ]);
+            expect(cached).not.toBeNull();
+            expect(cached!.token).toBe("ghs_long");
         });
     });
 

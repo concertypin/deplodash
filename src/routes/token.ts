@@ -91,44 +91,66 @@ export const tokenRouter = new Hono<HonoEnv>().post(
     validator("json", requestTokenSchema),
     async (c) => {
         const { repo, scopes } = c.req.valid("json");
-        const agentId = c.get("agent_id");
-        if (!agentId) {
-            return c.json({ error: "Agent not authenticated" }, 401);
-        }
 
         // Check if GitHub App is configured
         const appId = c.env.GITHUB_APP_ID;
         const privateKey = c.env.GITHUB_APP_PRIVATE_KEY;
-        const installationId = c.env.GITHUB_INSTALLATION_ID;
-        if (!appId || !privateKey || !installationId) {
+        if (!appId || !privateKey) {
             return c.json(
                 {
-                    error: "GitHub App not configured. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_INSTALLATION_ID.",
+                    error: "GitHub App not configured. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.",
                 },
                 400
             );
         }
 
         try {
-            const gh = new GitHubApp(appId, installationId, privateKey);
-
-            // Auto-create the repo if it doesn't exist
+            const gh = new GitHubApp(appId, privateKey);
             const [owner, name] = repo.split("/") as [string, string];
-            await gh.ensureRepoExists(owner, name);
-
             const tokenService = new TokenService(c.env.KV);
 
             // Determine base URL for consent redirect
             const url = new URL(c.req.url);
             const baseUrl = `${url.protocol}//${url.host}`;
 
-            const result = await tokenService.requestToken(
-                { repo, scopes, baseUrl },
-                () => gh.requestToken(scopes)
+            // Check consent FIRST — only create repo when token is being issued
+            const hasConsent = await tokenService.checkConsent(repo, scopes);
+
+            if (!hasConsent) {
+                const consentUrl =
+                    `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
+                    `&scopes=${encodeURIComponent(scopes.join(","))}`;
+                return c.json(
+                    { status: "needs_consent", url: consentUrl },
+                    202
+                );
+            }
+
+            // Consent exists: check cache first to avoid redundant GitHub API calls
+            const cached = await tokenService.getCachedToken(repo, scopes);
+            if (cached) {
+                return c.json({
+                    status: "ok",
+                    token: cached.token,
+                    expires_at: cached.expires_at,
+                });
+            }
+
+            // No cache hit: create repo if needed, then issue token
+            await gh.ensureRepoExists(owner, name);
+            const tokenResult = await gh.requestToken(scopes, owner);
+            await tokenService.cacheToken(
+                repo,
+                scopes,
+                tokenResult.token,
+                tokenResult.expires_at
             );
 
-            const status = result.status === "needs_consent" ? 202 : 200;
-            return c.json(result, status);
+            return c.json({
+                status: "ok",
+                token: tokenResult.token,
+                expires_at: tokenResult.expires_at,
+            });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             return c.json({ error: msg }, 500);

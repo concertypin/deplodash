@@ -6,14 +6,16 @@
  *   gh_token:${repo}:${scopesHash}   → CachedToken
  */
 
-import type { ConsentRecord, CachedToken } from "@/types";
+import type { ConsentRecord, CachedToken, ConsentEntry } from "@/types";
 import { hashScopes } from "@/helpers";
 import * as z from "zod";
 const dropBufferTime = 5 * 60 * 1000;
+const CONSENT_PREFIX = "consent:";
+
 // ─── KV prefix helpers ───────────────────────────────────────────────────────
 
 function consentKey(repo: string, scopesHash: string): string {
-    return `consent:${repo}:${scopesHash}`;
+    return `${CONSENT_PREFIX}${repo}:${scopesHash}`;
 }
 
 function tokenCacheKey(repo: string, scopesHash: string): string {
@@ -49,14 +51,76 @@ export class TokenService {
 
     /**
      * Record consent for (repo, scopes). Valid for 90 days.
+     * Also stores repo and scopes in the record for dashboard display.
      */
-    async recordConsent(repo: string, scopes: string[]): Promise<void> {
+    async recordConsent(
+        repo: string,
+        scopes: string[],
+        agentId?: string
+    ): Promise<void> {
         const hash = await hashScopes(scopes);
         const key = consentKey(repo, hash);
-        const record: ConsentRecord = { granted_at: new Date().toISOString() };
+        const record: ConsentRecord = {
+            repo,
+            scopes: scopes.join(","),
+            granted_at: new Date().toISOString(),
+            ...(agentId ? { agent_id: agentId } : {}),
+        };
         await this.kv.put(key, JSON.stringify(record), {
             expirationTtl: 90 * 24 * 3600,
         });
+    }
+
+    /**
+     * List all consent records in KV.
+     * Scans all keys with the `consent:` prefix and returns parsed entries.
+     *
+     * Note: KV list is eventually consistent — recently written entries may not
+     * appear immediately. Returns at most 1000 keys (single page — no cursor
+     * pagination implemented yet).
+     */
+    async listConsents(): Promise<ConsentEntry[]> {
+        const entries = await this.kv.list({ prefix: CONSENT_PREFIX });
+        const results: ConsentEntry[] = [];
+
+        // Fetch consent records in parallel, batching to stay within Worker subrequest limits
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < entries.keys.length; i += BATCH_SIZE) {
+            const batch = entries.keys.slice(i, i + BATCH_SIZE);
+            const values = await Promise.all(
+                batch.map((key) => this.kv.get(key.name, "json"))
+            );
+            for (let j = 0; j < batch.length; j++) {
+                const value = values[j];
+                if (!value) continue;
+                const record = value as Record<string, unknown>;
+                // Extract repo and scopes from the stored record
+                const repo =
+                    typeof record.repo === "string"
+                        ? record.repo
+                        : (batch[j]!.name.slice(CONSENT_PREFIX.length).split(
+                              ":"
+                          )[0] ?? "");
+                const scopes =
+                    typeof record.scopes === "string" ? record.scopes : "";
+                const grantedAt =
+                    typeof record.granted_at === "string"
+                        ? record.granted_at
+                        : "";
+                if (repo && scopes && grantedAt) {
+                    results.push({ repo, scopes, granted_at: grantedAt });
+                }
+            }
+        }
+
+        // Sort by granted_at descending (newest first)
+        results.sort(
+            (a, b) =>
+                new Date(b.granted_at).getTime() -
+                new Date(a.granted_at).getTime()
+        );
+
+        return results;
     }
 
     /**
@@ -66,6 +130,23 @@ export class TokenService {
         const hash = await hashScopes(scopes);
         const key = consentKey(repo, hash);
         await this.kv.delete(key);
+    }
+
+    /**
+     * Revoke all consents for a given repository.
+     * Useful when a user wants to revoke all access to a specific repo.
+     */
+    async revokeAllConsentsForRepo(repo: string): Promise<void> {
+        const consentPrefix = `${CONSENT_PREFIX}${repo}:`;
+        const tokenPrefix = `gh_token:${repo}:`;
+        const [consentEntries, tokenEntries] = await Promise.all([
+            this.kv.list({ prefix: consentPrefix }),
+            this.kv.list({ prefix: tokenPrefix }),
+        ]);
+        await Promise.all([
+            ...consentEntries.keys.map((k) => this.kv.delete(k.name)),
+            ...tokenEntries.keys.map((k) => this.kv.delete(k.name)),
+        ]);
     }
 
     // ─── Token caching ───────────────────────────────────────────────────────
