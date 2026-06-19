@@ -6,6 +6,7 @@ import { authRouter } from "@/routes/auth";
 import { oauthRouter } from "@/routes/oauth";
 import { consentRouter } from "@/routes/consent";
 import { tokenRouter } from "@/routes/token";
+import { userRouter } from "@/routes/user";
 import { llmsRouter } from "@/routes/llms";
 
 /**
@@ -35,4 +36,5 @@ export const router = new Hono<HonoEnv>()
     )
     // Routes NOT requiring session cookie
     .route("/api", tokenRouter)
+    .route("/api", userRouter)
     .route("/", llmsRouter);
