@@ -17,10 +17,11 @@ import { llmsRouter } from "@/routes/llms";
  *   /auth      → auth (OAuth start — /auth/github, /auth/consent)
  *   (root)     → oauth (/callback, /logout)
  *   /api       → API (/api/token)
+ *   /api/user  → User API (/api/user/token)
  *   /llms.txt  → LLM agent documentation
  *
  * sessionMiddleware (cookie decryption) is scoped only to routes that need it
- * — page routes and OAuth routes. token API and /llms.txt
+ * — page routes, OAuth routes, and user routes. token API and /llms.txt
  * use Bearer token or no auth and don't need cookie-based sessions.
  */
 export const router = new Hono<HonoEnv>()
@@ -36,5 +37,5 @@ export const router = new Hono<HonoEnv>()
     )
     // Routes NOT requiring session cookie
     .route("/api", tokenRouter)
-    .route("/api", userRouter)
+    .route("/api/user", userRouter)
     .route("/", llmsRouter);
