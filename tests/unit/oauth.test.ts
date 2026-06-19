@@ -114,6 +114,9 @@ describe("GET /callback", () => {
                     access_token: "gho_success_token",
                     token_type: "bearer",
                     scope: "repo,user",
+                    expires_in: 28800,
+                    refresh_token: "ghr_success",
+                    refresh_token_expires_in: 15811200,
                 }),
                 { headers: { "Content-Type": "application/json" } }
             )
@@ -145,6 +148,9 @@ describe("GET /callback", () => {
                     access_token: "gho_token",
                     token_type: "bearer",
                     scope: "repo",
+                    expires_in: 28800,
+                    refresh_token: "ghr_rotate",
+                    refresh_token_expires_in: 15811200,
                 }),
                 { headers: { "Content-Type": "application/json" } }
             )

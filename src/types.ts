@@ -124,6 +124,22 @@ export type ConsentEntry = {
 /**
  * A cached GitHub Installation Token in KV.
  */
+
+/**
+ * Session payload stored in the encrypted session cookie.
+ * access_token (8h expiry) + refresh_token (~6mo, rotated on each refresh).
+ */
+export type SessionPayload = {
+    /** GitHub OAuth user access token. */
+    accessToken: string;
+    /** GitHub OAuth refresh token (for token rotation). */
+    refreshToken: string;
+    /** Access token expiry as epoch milliseconds. */
+    accessExpiresAt: number;
+    /** Refresh token expiry as epoch milliseconds. */
+    refreshExpiresAt: number;
+};
+
 export type CachedToken = {
     token: string;
     expires_at: string;

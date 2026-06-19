@@ -1,10 +1,23 @@
 import { TokenExpiredError } from "@/errors";
 import type { Repo, GitHubUser } from "@/types";
 import * as z from "zod";
+
+// ─── OAuth Token Types ───────────────────────────────────────────────────
+
+export type OAuthTokenResult = {
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+    refreshTokenExpiresIn: number;
+};
+
 const accessTokenResponseSchema = z.object({
     access_token: z.string(),
     token_type: z.literal("bearer"),
     scope: z.string().transform((s) => s.split(",")),
+    expires_in: z.number(),
+    refresh_token: z.string(),
+    refresh_token_expires_in: z.number(),
 });
 
 // ─── GitHub API Client ──────────────────────────────────────────────────────
@@ -107,7 +120,7 @@ export class GitHubClient {
         clientId: string,
         clientSecret: string,
         redirectUri: string
-    ): Promise<string> {
+    ): Promise<OAuthTokenResult> {
         const res = await fetch("https://github.com/login/oauth/access_token", {
             method: "POST",
             headers: {
@@ -126,6 +139,46 @@ export class GitHubClient {
         const data = accessTokenResponseSchema.parse(await res.json());
         if (!data.access_token)
             throw new Error("No access_token in OAuth response");
-        return data.access_token;
+        return {
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresIn: data.expires_in,
+            refreshTokenExpiresIn: data.refresh_token_expires_in,
+        } as OAuthTokenResult;
+    }
+
+    /**
+     * Refresh an expired user access token using a refresh token with rotation.
+     * POST /login/oauth/access_token with grant_type=refresh_token.
+     * Both the access_token and refresh_token are rotated (old becomes invalid).
+     */
+    async refreshAccessToken(
+        refreshToken: string,
+        clientId: string,
+        clientSecret: string
+    ): Promise<OAuthTokenResult> {
+        const res = await fetch("https://github.com/login/oauth/access_token", {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                client_secret: clientSecret,
+                grant_type: "refresh_token",
+                refresh_token: refreshToken,
+            }),
+        });
+
+        const data = accessTokenResponseSchema.parse(await res.json());
+        if (!data.access_token)
+            throw new Error("No access_token in refresh response");
+        return {
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresIn: data.expires_in,
+            refreshTokenExpiresIn: data.refresh_token_expires_in,
+        } as OAuthTokenResult;
     }
 }

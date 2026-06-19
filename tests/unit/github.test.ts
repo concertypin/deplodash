@@ -25,6 +25,9 @@ describe("GitHubClient", () => {
                     access_token: "gho_new_token",
                     token_type: "bearer",
                     scope: "repo,user",
+                    expires_in: 28800,
+                    refresh_token: "ghr_test_refresh",
+                    refresh_token_expires_in: 15811200,
                 })
             );
 
@@ -36,7 +39,9 @@ describe("GitHubClient", () => {
                 "http://localhost/callback"
             );
 
-            expect(token).toBe("gho_new_token");
+            expect(token.accessToken).toBe("gho_new_token");
+            expect(token.refreshToken).toBe("ghr_test_refresh");
+            expect(token.expiresIn).toBe(28800);
             expect(mockFetch).toHaveBeenCalledWith(
                 "https://github.com/login/oauth/access_token",
                 expect.objectContaining({
@@ -54,6 +59,9 @@ describe("GitHubClient", () => {
                     access_token: "",
                     token_type: "bearer",
                     scope: "",
+                    expires_in: 28800,
+                    refresh_token: "ghr_abc",
+                    refresh_token_expires_in: 15811200,
                 })
             );
 
@@ -346,6 +354,9 @@ describe("GitHubClient", () => {
                     access_token: "gho_token",
                     token_type: "bearer",
                     scope: "repo",
+                    expires_in: 28800,
+                    refresh_token: "ghr_abc",
+                    refresh_token_expires_in: 15811200,
                 })
             );
 
@@ -372,6 +383,9 @@ describe("GitHubClient", () => {
                     access_token: "gho_token",
                     token_type: "invalid_type",
                     scope: "repo",
+                    expires_in: 28800,
+                    refresh_token: "ghr_abc",
+                    refresh_token_expires_in: 15811200,
                 })
             );
 

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { setCookie } from "hono/cookie";
-import type { HonoEnv } from "@/types";
+import type { HonoEnv, SessionPayload } from "@/types";
 import { GitHubClient } from "@/github";
 import { getOrInitKey, encryptWith, decryptWith } from "@/crypto";
 import { isSafeRedirect } from "@/helpers";
@@ -40,19 +40,29 @@ export const oauthRouter = new Hono<HonoEnv>()
 
         const tempClient = new GitHubClient("");
         try {
-            const accessToken = await tempClient.exchangeCode(
+            const oauthResult = await tempClient.exchangeCode(
                 code,
                 payload.v,
                 c.env.GITHUB_CLIENT_ID,
                 c.env.GITHUB_CLIENT_SECRET,
                 redirectUri
             );
-            const encryptedToken = await encryptWith(key, accessToken);
+            const sessionPayload: SessionPayload = {
+                accessToken: oauthResult.accessToken,
+                refreshToken: oauthResult.refreshToken,
+                accessExpiresAt: Date.now() + oauthResult.expiresIn * 1000,
+                refreshExpiresAt:
+                    Date.now() + oauthResult.refreshTokenExpiresIn * 1000,
+            };
+            const encryptedSession = await encryptWith(
+                key,
+                JSON.stringify(sessionPayload)
+            );
             const next = isSafeRedirect(payload.n || "/")
                 ? (payload.n ?? "/")
                 : "/";
             const isHttps = c.req.url.startsWith("https://");
-            setCookie(c, COOKIE_NAME, encryptedToken, {
+            setCookie(c, COOKIE_NAME, encryptedSession, {
                 path: "/",
                 httpOnly: true,
                 sameSite: "Lax",
