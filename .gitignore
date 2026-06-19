@@ -167,3 +167,6 @@ dist-ts
 
 worker-configuration.d.ts
 .wrangler
+
+# pnpm project — only pnpm-lock.yaml is used
+package-lock.json
