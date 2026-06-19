@@ -16,7 +16,8 @@ import { tokenRouter } from "@/routes/token";
 import { llmsRouter } from "@/routes/llms";
 import { authRouter } from "@/routes/auth";
 import { pagesRouter } from "@/routes/pages";
-import { resetKeyCache } from "@/crypto";
+import { userRouter } from "@/routes/user";
+import { resetKeyCache, getOrInitKey, encryptWith } from "@/crypto";
 import { sessionMiddleware } from "@/middleware";
 import { TokenService } from "@/token-service";
 import { env } from "cloudflare:workers";
@@ -747,5 +748,43 @@ describe("POST /api/token (without GitHub App configured)", () => {
         expect(resp.status).toBe(400);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toContain("GitHub App not configured");
+    });
+});
+
+describe("GET /api/user/token", () => {
+    const KEY = "test-secret-1234567890123456";
+
+    it("returns 401 when no session cookie", async () => {
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
+        const resp = await app.request("/api/user/token", undefined, BASE_ENV);
+        expect(resp.status).toBe(401);
+        const body = errorResponseSchema.parse(await resp.json());
+        expect(body.error).toBe("Not authenticated");
+    });
+
+    it("returns 401 when session cookie is malformed", async () => {
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
+        const resp = await app.request("/api/user/token", {
+            headers: { Cookie: "session=invalid-garbage" },
+        }, BASE_ENV);
+        expect(resp.status).toBe(401);
+        const body = errorResponseSchema.parse(await resp.json());
+        expect(body.error).toBe("Not authenticated");
+    });
+
+    it("returns user OAuth token when session cookie is valid", async () => {
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
+        const key = await getOrInitKey(KEY);
+        const encrypted = await encryptWith(key, "gho_test_user_token");
+        const resp = await app.request("/api/user/token", {
+            headers: { Cookie: `session=${encrypted}` },
+        }, BASE_ENV);
+
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+        expect(body).toEqual({
+            status: "ok",
+            token: "gho_test_user_token",
+        });
     });
 });
