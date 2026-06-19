@@ -755,30 +755,30 @@ describe("GET /api/user/token", () => {
     const KEY = "test-secret-1234567890123456";
 
     it("returns 401 when no session cookie", async () => {
-        const app = new Hono<HonoEnv>().route("/api", userRouter);
-        const resp = await app.request("/api/user/token");
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
+        const resp = await app.request("/api/user/token", undefined, BASE_ENV);
         expect(resp.status).toBe(401);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toBe("Not authenticated");
     });
 
     it("returns 401 when session cookie is malformed", async () => {
-        const app = new Hono<HonoEnv>().route("/api", userRouter);
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
         const resp = await app.request("/api/user/token", {
             headers: { Cookie: "session=invalid-garbage" },
-        });
+        }, BASE_ENV);
         expect(resp.status).toBe(401);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toBe("Not authenticated");
     });
 
     it("returns user OAuth token when session cookie is valid", async () => {
-        const app = new Hono<HonoEnv>().route("/api", userRouter);
+        const app = new Hono<HonoEnv>().route("/api/user", userRouter);
         const key = await getOrInitKey(KEY);
         const encrypted = await encryptWith(key, "gho_test_user_token");
         const resp = await app.request("/api/user/token", {
             headers: { Cookie: `session=${encrypted}` },
-        });
+        }, BASE_ENV);
 
         expect(resp.status).toBe(200);
         const body = await resp.json();
