@@ -54,10 +54,13 @@ export class TokenService {
      * Find stored consent for this repo and compute the intersection of
      * requested vs approved scopes.
      *
-     * Supports granular consent: if the user approved only a subset
-     * (e.g. contents:write + issues:read) but the agent requested more
-     * (e.g. contents:write + administration:write), this returns the
-     * intersection — what was both requested AND approved.
+     * Supports granular consent: combines all approved scopes across all
+     * active consent records for the repo (union), then intersects with
+     * what the agent requested.
+     *
+     * This means if the user approved `contents:read` in one session and
+     * `issues:write` in another, an agent requesting both gets both —
+     * not just whichever record happens to match best.
      *
      * Returns the effective scope list, or null if no overlap at all
      * (meaning the agent has no usable consent for this repo).
@@ -78,36 +81,14 @@ export class TokenService {
                 .filter(Boolean);
         }
 
-        // 2. Scan all consents for this repo to find the best overlap
-        const prefix = `${CONSENT_PREFIX}${repo}:`;
-        const entries = await this.kv.list({ prefix });
+        // 2. Combine all approved scopes across all consent records (union),
+        //    then intersect with what the agent actually requested.
+        const approvedScopes = await this.getAllApprovedScopes(repo);
+        const intersection = requestedScopes.filter((s) =>
+            approvedScopes.includes(s)
+        );
 
-        let bestMatch: string[] | null = null;
-
-        for (const entry of entries.keys) {
-            const value = await this.kv.get(entry.name, "json");
-            if (!value) continue;
-            const record = value as ConsentRecord;
-            const approvedScopes = record.scopes
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
-
-            // Compute intersection: what the agent requested AND the user approved
-            const intersection = requestedScopes.filter((s) =>
-                approvedScopes.includes(s)
-            );
-
-            // Pick the record with the most matching scopes
-            if (
-                intersection.length > 0 &&
-                (!bestMatch || intersection.length > bestMatch.length)
-            ) {
-                bestMatch = intersection;
-            }
-        }
-
-        return bestMatch;
+        return intersection.length > 0 ? intersection : null;
     }
 
     /**
