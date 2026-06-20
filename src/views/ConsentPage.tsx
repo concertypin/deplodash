@@ -1,22 +1,57 @@
 /**
  * Consent page component — User-facing page for approving agent token requests.
+ *
+ * Supports granular permission selection: the user can approve or deny
+ * each requested scope individually via checkboxes.
  */
 
 import type { FC } from "hono/jsx";
 import { Layout } from "./Layout";
-
-const SCOPE_LABELS: Record<string, string> = {
-    "contents:read": "Read repository contents",
-    "contents:write": "Read & write repository contents",
-    "workflows:write": "Read & write workflow files",
-    admin: "Full admin access",
-};
+import { SCOPE_CATEGORIES, SCOPE_LABELS } from "@/types";
 
 interface ConsentPageProps {
     repo: string;
     scopes: string;
     error?: string;
     success?: boolean;
+}
+
+/**
+ * Group scopes by their category for display.
+ */
+function categorizedScopes(scopeList: string[]) {
+    const categories: {
+        label: string;
+        scopes: { scope: string; label: string }[];
+    }[] = [];
+    const seen = new Set<string>();
+
+    for (const [, cat] of Object.entries(SCOPE_CATEGORIES)) {
+        const matching = cat.scopes.filter((s) => scopeList.includes(s));
+        if (matching.length === 0) continue;
+        categories.push({
+            label: cat.label,
+            scopes: matching.map((s) => ({
+                scope: s,
+                label: SCOPE_LABELS[s] ?? s,
+            })),
+        });
+        matching.forEach((s) => seen.add(s));
+    }
+
+    // Any scopes not in known categories (legacy like "admin", "contents:write+workflows:write")
+    const uncategorized = scopeList.filter((s) => !seen.has(s));
+    if (uncategorized.length > 0) {
+        categories.push({
+            label: "Other",
+            scopes: uncategorized.map((s) => ({
+                scope: s,
+                label: SCOPE_LABELS[s] ?? s,
+            })),
+        });
+    }
+
+    return categories;
 }
 
 export const ConsentPage: FC<ConsentPageProps> = ({
@@ -30,18 +65,24 @@ export const ConsentPage: FC<ConsentPageProps> = ({
         .map((s) => s.trim())
         .filter(Boolean);
 
+    const categories = categorizedScopes(scopeList);
+
     return (
         <Layout title={`Authorize Agent — ${repo}`}>
             <div class="hero min-h-screen">
-                <div class="hero-content w-full max-w-lg">
+                <div class="hero-content w-full max-w-xl">
                     <div class="card bg-base-200 shadow-xl w-full">
                         <div class="card-body">
                             <h2 class="card-title mb-2">
                                 🔑 Authorize Agent Access
                             </h2>
                             <p class="text-sm text-base-content/60 mb-4">
-                                An agent is requesting access to a repository.
-                                Review the details below.
+                                An agent is requesting access to
+                                <span class="font-mono font-semibold ml-1">
+                                    {repo}
+                                </span>
+                                . Select the permissions you want to grant, then
+                                confirm.
                             </p>
 
                             {error && (
@@ -54,28 +95,18 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                 <div class="alert alert-success mb-4">
                                     <span>
                                         ✅ Consent recorded. The agent can now
-                                        request tokens.
+                                        request tokens with the approved
+                                        permissions.
                                     </span>
                                 </div>
                             )}
 
-                            <div class="bg-base-300 rounded-lg p-4 mb-4">
-                                <div class="font-semibold mb-1">Repository</div>
-                                <div class="font-mono text-sm">{repo}</div>
-                                <div class="font-semibold mt-3 mb-1">
-                                    Requested Permissions
-                                </div>
-                                <div class="text-sm">
-                                    {scopeList.map((s, i) => (
-                                        <div key={i}>
-                                            • {SCOPE_LABELS[s] ?? s}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {!success ? (
-                                <form method="post" action="/auth/consent">
+                            {!success && (
+                                <form
+                                    method="post"
+                                    action="/auth/consent"
+                                    id="consent-form"
+                                >
                                     <input
                                         type="hidden"
                                         name="repo"
@@ -83,22 +114,59 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                     />
                                     <input
                                         type="hidden"
-                                        name="scopes"
+                                        name="requested_scopes"
                                         value={scopes}
                                     />
+
+                                    <div class="bg-base-300 rounded-lg p-4 mb-4">
+                                        <div class="font-semibold mb-3">
+                                            Requested Permissions
+                                        </div>
+                                        {categories.map((cat, ci) => (
+                                            <div key={ci} class="mb-3">
+                                                <div class="text-sm font-medium text-base-content/70 mb-1">
+                                                    {cat.label}
+                                                </div>
+                                                {cat.scopes.map((s) => (
+                                                    <label class="label cursor-pointer justify-start gap-3 py-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            name="scopes"
+                                                            value={s.scope}
+                                                            defaultChecked
+                                                            class="checkbox checkbox-sm checkbox-primary"
+                                                        />
+                                                        <span class="label-text text-sm">
+                                                            {s.label}
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+
                                     <div class="card-actions justify-end">
                                         <a href="/" class="btn btn-ghost">
-                                            Deny
+                                            Deny All
                                         </a>
                                         <button
                                             type="submit"
                                             class="btn btn-primary"
+                                            onclick="
+                                                const checked = document.querySelectorAll('input[name=\\'scopes\\']:checked');
+                                                if (checked.length === 0) {
+                                                    alert('Select at least one permission or click Deny.');
+                                                    return false;
+                                                }
+                                            "
                                         >
-                                            Confirm
+                                            Approve Selected
                                         </button>
                                     </div>
                                 </form>
-                            ) : (
+                            )}
+
+                            {success && (
                                 <div class="card-actions justify-end">
                                     <a href="/" class="btn btn-primary">
                                         Back to Dashboard

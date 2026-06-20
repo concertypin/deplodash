@@ -49,20 +49,46 @@ export const consentRouter = new Hono<HonoEnv>()
             "form",
             z.object({
                 repo: z.string().min(1),
-                scopes: z.string().min(1),
+                // scopes can be a single string (legacy) or array of strings (granular checkboxes)
+                scopes: z.union([z.string(), z.array(z.string())]),
+                requested_scopes: z.string().optional(),
             })
         ),
         async (c) => {
-            const { repo, scopes } = c.req.valid("form");
+            const {
+                repo,
+                scopes: rawScopes,
+                requested_scopes,
+            } = c.req.valid("form");
             const tokenService = new TokenService(c.env.KV);
             try {
-                const scopeList = scopes
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                await tokenService.recordConsent(repo, scopeList);
+                // Normalize scopes — handle both single comma-separated string and array from checkboxes
+                const scopeList: string[] = Array.isArray(rawScopes)
+                    ? rawScopes.map((s) => s.trim()).filter(Boolean)
+                    : rawScopes
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                // Parse the originally requested scopes for audit tracking
+                const requestedList: string[] | undefined = requested_scopes
+                    ? requested_scopes
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                    : undefined;
+                await tokenService.recordConsent(
+                    repo,
+                    scopeList,
+                    undefined,
+                    requestedList
+                );
+                const successScopes = scopeList.join(",");
                 const html = renderPage(
-                    <ConsentPage repo={repo} scopes={scopes} success={true} />
+                    <ConsentPage
+                        repo={repo}
+                        scopes={successScopes}
+                        success={true}
+                    />
                 );
                 return c.html(html);
             } catch (err: unknown) {
@@ -70,7 +96,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 const html = renderPage(
                     <ConsentPage
                         repo={repo}
-                        scopes={scopes}
+                        scopes={rawScopes?.toString() ?? ""}
                         error="Failed to record consent. Please try again."
                     />
                 );
