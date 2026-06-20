@@ -29,11 +29,16 @@ const tokenResponseSchema = z.object({
     status: z.literal("ok"),
     token: z.string(),
     expires_at: z.string(),
+    effective_scopes: z.array(z.string()).optional(),
 });
 
 const needsConsentResponseSchema = z.object({
     status: z.literal("needs_consent"),
     url: z.string(),
+    /** The scopes the agent requested. */
+    requested_scopes: z.array(z.string()).optional(),
+    /** Scopes the user has already approved for this repo (if any). */
+    approved_scopes: z.array(z.string()).optional(),
 });
 
 const errorResponseSchema = z.object({
@@ -110,35 +115,53 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const url = new URL(c.req.url);
             const baseUrl = `${url.protocol}//${url.host}`;
 
-            // Check consent FIRST — only create repo when token is being issued
-            const hasConsent = await tokenService.checkConsent(repo, scopes);
+            // Check consent — supports granular approval (user may have approved a subset)
+            const effectiveScopes: string[] | null =
+                await tokenService.findConsentScopes(repo, scopes);
 
-            if (!hasConsent) {
+            if (!effectiveScopes) {
+                // No matching consent found — check if the user has approved ANY scopes for this repo
+                const approvedScopes =
+                    await tokenService.getAllApprovedScopes(repo);
                 const consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
                     `&scopes=${encodeURIComponent(scopes.join(","))}`;
+
                 return c.json(
-                    { status: "needs_consent", url: consentUrl },
+                    {
+                        status: "needs_consent",
+                        url: consentUrl,
+                        requested_scopes: scopes,
+                        approved_scopes:
+                            approvedScopes.length > 0
+                                ? approvedScopes
+                                : undefined,
+                    },
                     202
                 );
             }
 
-            // Consent exists: check cache first to avoid redundant GitHub API calls
-            const cached = await tokenService.getCachedToken(repo, scopes);
+            // Effective scopes may differ from requested if user approved only a subset
+            // Check cache for the effective scopes
+            const cached = await tokenService.getCachedToken(
+                repo,
+                effectiveScopes
+            );
             if (cached) {
                 return c.json({
                     status: "ok",
                     token: cached.token,
                     expires_at: cached.expires_at,
+                    effective_scopes: effectiveScopes,
                 });
             }
 
-            // No cache hit: create repo if needed, then issue token
+            // No cache hit: create repo if needed, then issue token with effective scopes
             await gh.ensureRepoExists(owner, name);
-            const tokenResult = await gh.requestToken(scopes, owner);
+            const tokenResult = await gh.requestToken(effectiveScopes, owner);
             await tokenService.cacheToken(
                 repo,
-                scopes,
+                effectiveScopes,
                 tokenResult.token,
                 tokenResult.expires_at
             );
@@ -147,6 +170,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 status: "ok",
                 token: tokenResult.token,
                 expires_at: tokenResult.expires_at,
+                effective_scopes: effectiveScopes,
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);

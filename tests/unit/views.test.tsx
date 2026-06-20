@@ -44,9 +44,9 @@ describe("ConsentPage", () => {
         const html = renderContent(<ConsentPage {...defaultProps} />);
         expect(html).toContain("owner/repo");
         expect(html).toContain("Read repository contents");
-        expect(html).toContain("Read &amp; write workflow files");
+        expect(html).toContain("Manage workflow files");
         expect(html).toContain("Authorize Agent Access");
-        expect(html).toContain("Confirm");
+        expect(html).toContain("Approve Selected");
         expect(html).toContain("Deny");
     });
 

@@ -12,7 +12,6 @@
  * Uses Web Crypto API (native in Cloudflare Workers) for RS256 JWT signing.
  */
 
-import type { ScopePreset } from "@/types";
 import { z } from "zod";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -43,11 +42,47 @@ export interface InstallationToken {
     repositorySelection: string;
 }
 
-// ─── Scope Presets ───────────────────────────────────────────────────────────
+/**
+ * Map each supported scope to its GitHub permission name and level.
+ *
+ * Internal helper — avoids a large switch or if-else chain.
+ * The value is [permName, permLevel].
+ */
+const SCOPE_TO_GITHUB: Record<string, [string, string]> = {
+    "contents:read": ["contents", "read"],
+    "contents:write": ["contents", "write"],
+    "issues:read": ["issues", "read"],
+    "issues:write": ["issues", "write"],
+    "pulls:read": ["pull_requests", "read"],
+    "pulls:write": ["pull_requests", "write"],
+    "actions:read": ["actions", "read"],
+    "actions:write": ["actions", "write"],
+    "metadata:read": ["metadata", "read"],
+    "deployments:read": ["deployments", "read"],
+    "deployments:write": ["deployments", "write"],
+    "administration:read": ["administration", "read"],
+    "administration:write": ["administration", "write"],
+    "members:read": ["members", "read"],
+    "members:write": ["members", "write"],
+    "secrets:read": ["secrets", "read"],
+    "secrets:write": ["secrets", "write"],
+    "pages:read": ["pages", "read"],
+    "pages:write": ["pages", "write"],
+    "webhooks:read": ["webhooks", "read"],
+    "webhooks:write": ["webhooks", "write"],
+    "environments:read": ["environments", "read"],
+    "environments:write": ["environments", "write"],
+    "variables:read": ["variables", "read"],
+    "variables:write": ["variables", "write"],
+    "workflows:write": ["workflows", "write"],
+    "checks:read": ["checks", "read"],
+    "checks:write": ["checks", "write"],
+};
 
-const SCOPE_PRESETS: Record<ScopePreset, Record<string, string>> = {
-    "contents:read": { metadata: "read", contents: "read" },
-    "contents:write": { metadata: "read", contents: "write" },
+/**
+ * Legacy preset combinations — shortcut for common patterns.
+ */
+const LEGACY_PRESETS: Record<string, Record<string, string>> = {
     "contents:write+workflows:write": {
         metadata: "read",
         contents: "write",
@@ -63,19 +98,45 @@ const SCOPE_PRESETS: Record<ScopePreset, Record<string, string>> = {
 
 /**
  * Convert a scope array to a GitHub permissions object.
+ *
+ * Each scope in the array is mapped to its corresponding GitHub permission.
+ * @param scopes — list of scope strings (e.g. ["contents:read", "issues:write"])
+ * @returns a GitHub permissions object (e.g. { metadata: "read", contents: "read", issues: "write" })
  */
 export function permissionsFromScopes(
     scopes: string[]
 ): Record<string, string> {
-    const key = [...scopes].sort().join("+");
-    if (key in SCOPE_PRESETS) return { ...SCOPE_PRESETS[key as ScopePreset] };
-    const perms: Record<string, string> = { metadata: "read" };
-    for (const s of scopes) {
-        if (s === "contents:read") perms.contents = "read";
-        else if (s === "contents:write") perms.contents = "write";
-        else if (s === "workflows:write") perms.workflows = "write";
-        else if (s === "admin") return { ...SCOPE_PRESETS.admin };
+    const sorted = [...scopes].sort().join("+");
+
+    // Check legacy presets first for backward compat
+    if (sorted in LEGACY_PRESETS) {
+        return { ...LEGACY_PRESETS[sorted] };
     }
+
+    // Check for literal "admin" in the array
+    if (scopes.includes("admin")) {
+        return { ...LEGACY_PRESETS.admin };
+    }
+
+    // Build permissions from individual scope mappings
+    const perms: Record<string, string> = {};
+    for (const s of scopes) {
+        const mapping = SCOPE_TO_GITHUB[s];
+        if (mapping) {
+            const [permName, permLevel] = mapping;
+            // Upgrade level: write >= read. Don't downgrade if already higher.
+            const existing = perms[permName];
+            if (!existing || (existing === "read" && permLevel === "write")) {
+                perms[permName] = permLevel;
+            }
+        }
+    }
+
+    // Always include metadata:read as base permission
+    if (!perms.metadata) {
+        perms.metadata = "read";
+    }
+
     return perms;
 }
 

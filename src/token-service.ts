@@ -40,7 +40,8 @@ export class TokenService {
     // ─── Consent ─────────────────────────────────────────────────────────────
 
     /**
-     * Check if consent has been granted for (repo, scopes).
+     * Check if consent has been granted for the exact (repo, scopes) combination.
+     * Uses hash-based lookup for fast path (cache-friendly).
      */
     async checkConsent(repo: string, scopes: string[]): Promise<boolean> {
         const hash = await hashScopes(scopes);
@@ -50,13 +51,82 @@ export class TokenService {
     }
 
     /**
+     * Find stored consent for this repo and compute the intersection of
+     * requested vs approved scopes.
+     *
+     * Supports granular consent: combines all approved scopes across all
+     * active consent records for the repo (union), then intersects with
+     * what the agent requested.
+     *
+     * This means if the user approved `contents:read` in one session and
+     * `issues:write` in another, an agent requesting both gets both —
+     * not just whichever record happens to match best.
+     *
+     * Returns the effective scope list, or null if no overlap at all
+     * (meaning the agent has no usable consent for this repo).
+     */
+    async findConsentScopes(
+        repo: string,
+        requestedScopes: string[]
+    ): Promise<string[] | null> {
+        // 1. Try exact hash match first (fast path — saves a KV list scan)
+        const exactHash = await hashScopes(requestedScopes);
+        const exactKey = consentKey(repo, exactHash);
+        const exactValue = await this.kv.get(exactKey, "json");
+        if (exactValue) {
+            const record = exactValue as ConsentRecord;
+            return record.scopes
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
+
+        // 2. Combine all approved scopes across all consent records (union),
+        //    then intersect with what the agent actually requested.
+        const approvedScopes = await this.getAllApprovedScopes(repo);
+        const intersection = requestedScopes.filter((s) =>
+            approvedScopes.includes(s)
+        );
+
+        return intersection.length > 0 ? intersection : null;
+    }
+
+    /**
+     * Get all distinct approved scopes for a repo across all consent records.
+     * Returns an empty array if no consent exists for this repo.
+     *
+     * Used when the agent's requested scopes don't match — allows the agent
+     * to see what IS available and retry with a compatible scope set.
+     */
+    async getAllApprovedScopes(repo: string): Promise<string[]> {
+        const prefix = `${CONSENT_PREFIX}${repo}:`;
+        const entries = await this.kv.list({ prefix });
+
+        const allScopes = new Set<string>();
+        for (const entry of entries.keys) {
+            const value = await this.kv.get(entry.name, "json");
+            if (!value) continue;
+            const record = value as ConsentRecord;
+            for (const s of record.scopes
+                .split(",")
+                .map((x) => x.trim())
+                .filter(Boolean)) {
+                allScopes.add(s);
+            }
+        }
+
+        return [...allScopes];
+    }
+
+    /**
      * Record consent for (repo, scopes). Valid for 90 days.
      * Also stores repo and scopes in the record for dashboard display.
      */
     async recordConsent(
         repo: string,
         scopes: string[],
-        agentId?: string
+        agentId?: string,
+        requestedScopes?: string[]
     ): Promise<void> {
         const hash = await hashScopes(scopes);
         const key = consentKey(repo, hash);
@@ -65,6 +135,9 @@ export class TokenService {
             scopes: scopes.join(","),
             granted_at: new Date().toISOString(),
             ...(agentId ? { agent_id: agentId } : {}),
+            ...(requestedScopes
+                ? { requested_scopes: requestedScopes.join(",") }
+                : {}),
         };
         await this.kv.put(key, JSON.stringify(record), {
             expirationTtl: 90 * 24 * 3600,
@@ -107,8 +180,19 @@ export class TokenService {
                     typeof record.granted_at === "string"
                         ? record.granted_at
                         : "";
+                const requestedScopes =
+                    typeof record.requested_scopes === "string"
+                        ? record.requested_scopes
+                        : undefined;
                 if (repo && scopes && grantedAt) {
-                    results.push({ repo, scopes, granted_at: grantedAt });
+                    const entry: ConsentEntry = {
+                        repo,
+                        scopes,
+                        granted_at: grantedAt,
+                    };
+                    if (requestedScopes)
+                        entry.requested_scopes = requestedScopes;
+                    results.push(entry);
                 }
             }
         }
@@ -220,11 +304,13 @@ export class TokenService {
             scopes: string[];
             baseUrl: string;
         },
-        getToken: () => Promise<{ token: string; expires_at: string }>
+        getToken: (
+            effectiveScopes: string[]
+        ) => Promise<{ token: string; expires_at: string }>
     ): Promise<TokenRequestResult> {
         const { repo, scopes, baseUrl } = params;
 
-        // 1. Check cache
+        // 1. Check cache for exact requested scopes
         const cached = await this.getCachedToken(repo, scopes);
         if (cached) {
             return {
@@ -234,18 +320,49 @@ export class TokenService {
             };
         }
 
-        // 2. Check consent
-        const hasConsent = await this.checkConsent(repo, scopes);
-        if (!hasConsent) {
-            const consentUrl =
-                `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                `&scopes=${encodeURIComponent(scopes.join(","))}`;
-            return { status: "needs_consent", url: consentUrl };
+        // 2. Find effective scopes from consent (supports granular approval)
+        let effectiveScopes: string[];
+        const exactConsent = await this.checkConsent(repo, scopes);
+        if (exactConsent) {
+            effectiveScopes = scopes;
+        } else {
+            // Try to find a stored consent covering a superset or partial match
+            const foundScopes = await this.findConsentScopes(repo, scopes);
+            if (!foundScopes) {
+                const consentUrl =
+                    `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
+                    `&scopes=${encodeURIComponent(scopes.join(","))}`;
+                return { status: "needs_consent", url: consentUrl };
+            }
+            effectiveScopes = foundScopes;
         }
 
-        // 3. Fetch & cache
-        const result = await getToken();
-        await this.cacheToken(repo, scopes, result.token, result.expires_at);
+        // 3. Check cache for effective scopes (deep compare — arrays are always !== by reference)
+        const sameScopes =
+            effectiveScopes.length === scopes.length &&
+            effectiveScopes.every((s, i) => s === scopes[i]);
+        if (!sameScopes) {
+            const effectiveCached = await this.getCachedToken(
+                repo,
+                effectiveScopes
+            );
+            if (effectiveCached) {
+                return {
+                    status: "ok",
+                    token: effectiveCached.token,
+                    expires_at: effectiveCached.expires_at,
+                };
+            }
+        }
+
+        // 4. Fetch token with effective scopes (the approved subset)
+        const result = await getToken(effectiveScopes);
+        await this.cacheToken(
+            repo,
+            effectiveScopes,
+            result.token,
+            result.expires_at
+        );
         return {
             status: "ok",
             token: result.token,
