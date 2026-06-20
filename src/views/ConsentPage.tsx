@@ -133,7 +133,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                                             type="checkbox"
                                                             name="scopes"
                                                             value={s.scope}
-                                                            defaultChecked
+                                                            checked
                                                             class="checkbox checkbox-sm checkbox-primary"
                                                         />
                                                         <span class="label-text text-sm">

@@ -54,7 +54,9 @@ describe("GET /llms.txt", () => {
         const text = await resp.text();
         expect(text).toContain("Deplodash");
         expect(text).toContain("/api/token");
-        expect(resp.headers.get("Content-Type")).toContain("text/plain");
+        expect(text).toContain("/api/user/token");
+        expect(text).toContain("effective_scopes");
+        expect(resp.headers.get("Content-Type")).toContain("text/markdown");
     });
 });
 
