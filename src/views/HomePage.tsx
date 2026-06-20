@@ -12,6 +12,7 @@ export interface ConsentItem {
     repo: string;
     scopes: string;
     granted_at: string;
+    granted_by?: string;
 }
 
 interface HomePageProps {
@@ -146,6 +147,7 @@ const ConsentList: FC<{ consents: ConsentItem[] }> = ({ consents }) => (
                         <tr>
                             <th>Repository</th>
                             <th>Scopes</th>
+                            <th>Granted By</th>
                             <th>Granted</th>
                             <th>Action</th>
                         </tr>
@@ -184,6 +186,11 @@ const ConsentRow: FC<{ item: ConsentItem }> = ({ item }) => {
                         </span>
                     ))}
                 </div>
+            </td>
+            <td class="text-sm text-base-content/60">
+                {item.granted_by ?? (
+                    <span class="text-base-content/40">&mdash;</span>
+                )}
             </td>
             <td class="text-sm text-base-content/60">{grantedDate}</td>
             <td>

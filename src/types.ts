@@ -242,6 +242,8 @@ export type ConsentRecord = {
     agent_id?: string;
     /** Optional: the originally requested scopes (before granular filtering). */
     requested_scopes?: string;
+    /** GitHub user login who granted this consent. */
+    granted_by?: string;
 };
 
 /**
@@ -253,6 +255,8 @@ export type ConsentEntry = {
     granted_at: string;
     /** Originally requested scopes, if available (for showing granular diff on dashboard). */
     requested_scopes?: string;
+    /** GitHub user login who granted this consent. */
+    granted_by?: string;
 };
 
 /**

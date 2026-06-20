@@ -153,7 +153,8 @@ export class TokenService {
         repo: string,
         scopes: string[],
         agentId?: string,
-        requestedScopes?: string[]
+        requestedScopes?: string[],
+        grantedBy?: string
     ): Promise<void> {
         const hash = await hashScopes(scopes);
         const key = consentKey(repo, hash);
@@ -165,6 +166,7 @@ export class TokenService {
             ...(requestedScopes
                 ? { requested_scopes: requestedScopes.join(",") }
                 : {}),
+            ...(grantedBy ? { granted_by: grantedBy } : {}),
         };
         await this.kv.put(key, JSON.stringify(record), {
             expirationTtl: 90 * 24 * 3600,
@@ -200,6 +202,7 @@ export class TokenService {
                     scopes: record.scopes,
                     granted_at: record.granted_at,
                 };
+                if (record.granted_by) entry.granted_by = record.granted_by;
                 if (record.requested_scopes)
                     entry.requested_scopes = record.requested_scopes;
                 results.push(entry);

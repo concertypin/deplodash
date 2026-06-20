@@ -15,6 +15,7 @@
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
+import { SCOPE_LABELS } from "@/types";
 import type { HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token-service";
@@ -93,11 +94,66 @@ export const consentRouter = new Hono<HonoEnv>()
                           .map((s) => s.trim())
                           .filter(Boolean)
                     : undefined;
+                // Get the authenticated GitHub user for audit trail (non-fatal)
+                const ghClient = c.get("client")!;
+                let grantedBy: string | undefined;
+                try {
+                    const ghUser = await ghClient.getUser();
+                    grantedBy = ghUser.login;
+                } catch {
+                    // GitHub API call failed — consent still works, just without audit trail
+                }
+
+                // Validate that approved scopes are a subset of the originally requested scopes.
+                // This prevents the consent page from being manipulated to grant wider permissions
+                // than what the agent originally requested.
+                if (requested_scopes) {
+                    const originallyRequested = requested_scopes
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                    const invalidScopes = scopeList.filter(
+                        (s) => !originallyRequested.includes(s)
+                    );
+                    if (invalidScopes.length > 0) {
+                        const html = renderPage(
+                            <ConsentPage
+                                repo={repo}
+                                scopes={requested_scopes}
+                                error={`Cannot approve scopes not in the original request: ${invalidScopes.join(", ")}`}
+                            />
+                        );
+                        return c.html(html, 400);
+                    }
+                }
+
+                // Validate that all scopes are known scope strings
+                const knownScopes = new Set(Object.keys(SCOPE_LABELS));
+                const unknownScopes = scopeList.filter(
+                    (s) =>
+                        !knownScopes.has(s) &&
+                        s !== "admin" &&
+                        s !== "contents:write+workflows:write"
+                );
+                if (unknownScopes.length > 0) {
+                    const html = renderPage(
+                        <ConsentPage
+                            repo={repo}
+                            scopes={
+                                requested_scopes ?? rawScopes?.toString() ?? ""
+                            }
+                            error={`Unknown scope(s): ${unknownScopes.join(", ")}`}
+                        />
+                    );
+                    return c.html(html, 400);
+                }
+
                 await tokenService.recordConsent(
                     repo,
                     scopeList,
                     undefined,
-                    requestedList
+                    requestedList,
+                    grantedBy
                 );
                 const successScopes = scopeList.join(",");
                 const html = renderPage(
