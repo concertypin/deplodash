@@ -12,7 +12,7 @@ export type OAuthTokenResult = {
 };
 
 const accessTokenResponseSchema = z.object({
-    access_token: z.string(),
+    access_token: z.string().min(1),
     token_type: z.literal("bearer"),
     scope: z.string().transform((s) => s.split(",")),
     expires_in: z.number(),
@@ -134,17 +134,20 @@ export class GitHubClient {
                 code_verifier: verifier,
                 redirect_uri: redirectUri,
             }),
-        });
+        }).then((r) => r.json());
 
-        const data = accessTokenResponseSchema.parse(await res.json());
-        if (!data.access_token)
-            throw new Error("No access_token in OAuth response");
+        const { data, success } = accessTokenResponseSchema.safeParse(res);
+
+        if (!success)
+            throw new Error(
+                `No access_token in OAuth response, received: ${JSON.stringify(res)}`
+            );
         return {
             accessToken: data.access_token,
             refreshToken: data.refresh_token,
             expiresIn: data.expires_in,
             refreshTokenExpiresIn: data.refresh_token_expires_in,
-        } as OAuthTokenResult;
+        } satisfies OAuthTokenResult;
     }
 
     /**
@@ -169,16 +172,18 @@ export class GitHubClient {
                 grant_type: "refresh_token",
                 refresh_token: refreshToken,
             }),
-        });
+        }).then((r) => r.json());
 
-        const data = accessTokenResponseSchema.parse(await res.json());
-        if (!data.access_token)
-            throw new Error("No access_token in refresh response");
+        const { data, success } = accessTokenResponseSchema.safeParse(res);
+        if (!success)
+            throw new Error(
+                `No access_token in refresh response, received: ${JSON.stringify(res)}`
+            );
         return {
             accessToken: data.access_token,
             refreshToken: data.refresh_token,
             expiresIn: data.expires_in,
             refreshTokenExpiresIn: data.refresh_token_expires_in,
-        } as OAuthTokenResult;
+        } satisfies OAuthTokenResult;
     }
 }

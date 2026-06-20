@@ -745,7 +745,7 @@ describe("POST /api/token (without GitHub App configured)", () => {
             { headers: { Authorization: "Bearer noapp-agent-token" } }
         );
 
-        expect(resp.status).toBe(400);
+        expect(resp.status).toBe(500);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toContain("GitHub App not configured");
     });

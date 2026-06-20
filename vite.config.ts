@@ -83,9 +83,11 @@ export default defineConfig(() => {
         },
         build: buildConfig,
         clearScreen: false,
-        esbuild: {
-            jsx: "automatic",
-            jsxImportSource: "hono/jsx",
+        oxc: {
+            jsx: {
+                importSource: "hono/jsx",
+                runtime: "automatic",
+            },
         },
         resolve,
         test: testConfig,

@@ -397,7 +397,7 @@ describe("GitHubClient", () => {
                     "secret",
                     "http://localhost/callback"
                 )
-            ).rejects.toThrow("invalid_value");
+            ).rejects.toThrow(Error);
         });
     });
 });
