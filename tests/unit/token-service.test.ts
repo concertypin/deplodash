@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, assert } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:workers";
 import { TokenService } from "@/token-service";
+import { hashScopes } from "@/helpers";
 
 describe("TokenService", () => {
     let kv: KVNamespace;
@@ -46,6 +47,38 @@ describe("TokenService", () => {
                 "contents:read",
             ]);
             expect(result).toBe(false);
+        });
+
+        it("deletes malformed consent records when read", async () => {
+            const scopes = ["contents:read"];
+            const repo = "broken/repo";
+            const hash = await hashScopes(scopes);
+            const key = `consent:${repo}:${hash}`;
+            await kv.put(
+                key,
+                JSON.stringify({
+                    granted_at: "2026-06-16T12:14:54.136Z",
+                })
+            );
+
+            const result = await service.requestToken(
+                {
+                    repo,
+                    scopes,
+                    baseUrl: "http://test",
+                },
+                () =>
+                    Promise.resolve({
+                        token: "ghs_test",
+                        expires_at: new Date(
+                            Date.now() + 3600000
+                        ).toISOString(),
+                    })
+            );
+
+            expect(result.status).toBe("needs_consent");
+            if (result.status !== "needs_consent") return;
+            expect(await kv.get(key)).toBeNull();
         });
     });
 
@@ -261,7 +294,8 @@ describe("TokenService", () => {
                         ).toISOString(),
                     })
             );
-            assert(result.status === "needs_consent");
+            expect(result.status).toBe("needs_consent");
+            if (result.status !== "needs_consent") return;
             expect(result.url).toContain("/auth/consent");
             expect(result.url).toContain("owner%2Frepo");
         });
@@ -306,7 +340,8 @@ describe("TokenService", () => {
                 },
                 getToken
             );
-            assert(first.status === "ok");
+            expect(first.status).toBe("ok");
+            if (first.status !== "ok") return;
             expect(first.token).toBe("ghs_1");
 
             // Second call: uses cache
@@ -318,7 +353,8 @@ describe("TokenService", () => {
                 },
                 getToken
             );
-            assert(second.status === "ok");
+            expect(second.status).toBe("ok");
+            if (second.status !== "ok") return;
             expect(second.token).toBe("ghs_1"); // Same cached value
 
             expect(callCount).toBe(1); // getToken only called once

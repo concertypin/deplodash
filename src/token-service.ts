@@ -12,6 +12,14 @@ import * as z from "zod";
 const dropBufferTime = 5 * 60 * 1000;
 const CONSENT_PREFIX = "consent:";
 
+const consentRecordSchema = z.object({
+    repo: z.string().min(1),
+    scopes: z.string().min(1),
+    granted_at: z.string().min(1),
+    agent_id: z.string().optional(),
+    requested_scopes: z.string().optional(),
+});
+
 // ─── KV prefix helpers ───────────────────────────────────────────────────────
 
 function consentKey(repo: string, scopesHash: string): string {
@@ -37,6 +45,22 @@ export class TokenService {
         this.kv = kv;
     }
 
+    private discardMalformedConsentKey(key: string): void {
+        void this.kv.delete(key).catch(() => undefined);
+    }
+
+    private parseConsentRecord(
+        key: string,
+        value: unknown
+    ): ConsentRecord | null {
+        const parsed = consentRecordSchema.safeParse(value);
+        if (!parsed.success) {
+            this.discardMalformedConsentKey(key);
+            return null;
+        }
+        return parsed.data as ConsentRecord;
+    }
+
     // ─── Consent ─────────────────────────────────────────────────────────────
 
     /**
@@ -47,7 +71,8 @@ export class TokenService {
         const hash = await hashScopes(scopes);
         const key = consentKey(repo, hash);
         const value = await this.kv.get(key, "json");
-        return value !== null;
+        if (!value) return false;
+        return this.parseConsentRecord(key, value) !== null;
     }
 
     /**
@@ -74,7 +99,8 @@ export class TokenService {
         const exactKey = consentKey(repo, exactHash);
         const exactValue = await this.kv.get(exactKey, "json");
         if (exactValue) {
-            const record = exactValue as ConsentRecord;
+            const record = this.parseConsentRecord(exactKey, exactValue);
+            if (!record) return null;
             return record.scopes
                 .split(",")
                 .map((s) => s.trim())
@@ -106,7 +132,8 @@ export class TokenService {
         for (const entry of entries.keys) {
             const value = await this.kv.get(entry.name, "json");
             if (!value) continue;
-            const record = value as ConsentRecord;
+            const record = this.parseConsentRecord(entry.name, value);
+            if (!record) continue;
             for (const s of record.scopes
                 .split(",")
                 .map((x) => x.trim())
@@ -166,34 +193,16 @@ export class TokenService {
             for (let j = 0; j < batch.length; j++) {
                 const value = values[j];
                 if (!value) continue;
-                const record = value as Record<string, unknown>;
-                // Extract repo and scopes from the stored record
-                const repo =
-                    typeof record.repo === "string"
-                        ? record.repo
-                        : (batch[j]!.name.slice(CONSENT_PREFIX.length).split(
-                              ":"
-                          )[0] ?? "");
-                const scopes =
-                    typeof record.scopes === "string" ? record.scopes : "";
-                const grantedAt =
-                    typeof record.granted_at === "string"
-                        ? record.granted_at
-                        : "";
-                const requestedScopes =
-                    typeof record.requested_scopes === "string"
-                        ? record.requested_scopes
-                        : undefined;
-                if (repo && scopes && grantedAt) {
-                    const entry: ConsentEntry = {
-                        repo,
-                        scopes,
-                        granted_at: grantedAt,
-                    };
-                    if (requestedScopes)
-                        entry.requested_scopes = requestedScopes;
-                    results.push(entry);
-                }
+                const record = this.parseConsentRecord(batch[j]!.name, value);
+                if (!record) continue;
+                const entry: ConsentEntry = {
+                    repo: record.repo,
+                    scopes: record.scopes,
+                    granted_at: record.granted_at,
+                };
+                if (record.requested_scopes)
+                    entry.requested_scopes = record.requested_scopes;
+                results.push(entry);
             }
         }
 
