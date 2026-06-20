@@ -21,10 +21,7 @@ import { GitHubApp } from "@/github-app";
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const requestTokenSchema = z.object({
-    repo: z
-        .string()
-        .min(1)
-        .regex(/^[\w.-]+\/[\w.-]+$/, "Invalid repo format (use owner/repo)"),
+    repo: z.templateLiteral([z.string(), z.literal("/"), z.string()]),
     scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
 });
 
@@ -100,7 +97,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 {
                     error: "GitHub App not configured. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.",
                 },
-                400
+                500
             );
         }
 

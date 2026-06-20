@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token-service";
+import { TokenExpiredError } from "@/errors";
 import { renderPage, HomePage } from "@/views";
 import type { ConsentItem } from "@/views";
 import { escapeHtml } from "@/helpers";
@@ -33,6 +34,9 @@ export const pagesRouter = new Hono<HonoEnv>()
                 )
             );
         } catch (err: unknown) {
+            if (err instanceof TokenExpiredError) {
+                return c.redirect("/auth/github");
+            }
             const msg = err instanceof Error ? err.message : String(err);
             return c.html(
                 `<div class="p-8 text-error">Error: ${escapeHtml(msg)}</div>`
