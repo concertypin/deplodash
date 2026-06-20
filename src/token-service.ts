@@ -337,8 +337,11 @@ export class TokenService {
             effectiveScopes = foundScopes;
         }
 
-        // 3. Check cache for effective scopes
-        if (effectiveScopes !== scopes) {
+        // 3. Check cache for effective scopes (deep compare — arrays are always !== by reference)
+        const sameScopes =
+            effectiveScopes.length === scopes.length &&
+            effectiveScopes.every((s, i) => s === scopes[i]);
+        if (!sameScopes) {
             const effectiveCached = await this.getCachedToken(
                 repo,
                 effectiveScopes

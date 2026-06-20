@@ -49,8 +49,9 @@ export const consentRouter = new Hono<HonoEnv>()
             "form",
             z.object({
                 repo: z.string().min(1),
-                // scopes can be a single string (legacy) or array of strings (granular checkboxes)
-                scopes: z.union([z.string(), z.array(z.string())]),
+                // scopes can be a single string (legacy) or array of strings (granular checkboxes).
+                // Optional because unchecking all checkboxes means nothing is posted for scopes.
+                scopes: z.union([z.string(), z.array(z.string())]).optional(),
                 requested_scopes: z.string().optional(),
             })
         ),
@@ -62,13 +63,29 @@ export const consentRouter = new Hono<HonoEnv>()
             } = c.req.valid("form");
             const tokenService = new TokenService(c.env.KV);
             try {
-                // Normalize scopes — handle both single comma-separated string and array from checkboxes
-                const scopeList: string[] = Array.isArray(rawScopes)
-                    ? rawScopes.map((s) => s.trim()).filter(Boolean)
-                    : rawScopes
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean);
+                // Handle empty scopes — no checkboxes were checked
+                if (!rawScopes) {
+                    const html = renderPage(
+                        <ConsentPage
+                            repo={repo}
+                            scopes=""
+                            error="You must select at least one permission to proceed."
+                        />
+                    );
+                    return c.html(html, 400);
+                }
+                // Normalize scopes — handle both single comma-separated string and array from checkboxes.
+                // Deduplicate to ensure clean data in KV.
+                const scopeList: string[] = [
+                    ...new Set(
+                        Array.isArray(rawScopes)
+                            ? rawScopes.map((s) => s.trim()).filter(Boolean)
+                            : rawScopes
+                                  .split(",")
+                                  .map((s) => s.trim())
+                                  .filter(Boolean)
+                    ),
+                ];
                 // Parse the originally requested scopes for audit tracking
                 const requestedList: string[] | undefined = requested_scopes
                     ? requested_scopes
