@@ -122,7 +122,9 @@ export const consentRouter = new Hono<HonoEnv>()
                     return c.html(html, 400);
                 }
             } else if (!rawRequestedScopes && c.env.ENCRYPTION_SECRET) {
-                // Encryption configured but no scope info submitted — reject
+                // Both encrypted field AND plaintext scope info are absent.
+                // Without at least one, subset validation is skipped entirely,
+                // opening a bypass — reject.
                 const html = renderPage(
                     <ConsentPage
                         repo={repo}

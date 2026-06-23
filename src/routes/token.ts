@@ -128,7 +128,8 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 );
                 const consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                    `&scopes=${encodeURIComponent(scopes.join(","))}`;
+                    `&scopes=${encodeURIComponent(scopes.join(","))}` +
+                    `&agent_id=${encodeURIComponent(agentId)}`;
 
                 return c.json(
                     {
