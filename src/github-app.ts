@@ -423,15 +423,13 @@ export class GitHubApp {
                         `https://github.com/apps/${this.appId}/installations/new`
                 );
             } else {
-                const body = await userRes.text().catch(() => "");
                 throw new Error(
-                    `Failed to check user installation for "${owner}": ${userRes.status} ${body.slice(0, 200)}`
+                    `Failed to check user installation for "${owner}": ${userRes.status}`
                 );
             }
         } else {
-            const body = await orgRes.text().catch(() => "");
             throw new Error(
-                `Failed to check org installation for "${owner}": ${orgRes.status} ${body.slice(0, 200)}`
+                `Failed to check org installation for "${owner}": ${orgRes.status}`
             );
         }
 
@@ -477,10 +475,7 @@ export class GitHubApp {
             body: JSON.stringify({ permissions }),
         });
         if (!res.ok) {
-            const body = await res.text().catch(() => "");
-            throw new Error(
-                `GitHub App token request failed: ${res.status} ${body.slice(0, 500)}`
-            );
+            throw new Error(`GitHub App token request failed: ${res.status}`);
         }
         const ghResponse = installationTokenResponseSchema.parse(
             await res.json()
@@ -537,9 +532,8 @@ export class GitHubApp {
         );
         if (checkRes.status === 200) return true;
         if (checkRes.status !== 404) {
-            const body = await checkRes.text().catch(() => "");
             throw new Error(
-                `Failed to check repo existence: ${checkRes.status} ${body.slice(0, 200)}`
+                `Failed to check repo existence: ${checkRes.status}`
             );
         }
 
@@ -573,9 +567,8 @@ export class GitHubApp {
         });
 
         if (!createRes.ok) {
-            const body = await createRes.text().catch(() => "");
             throw new Error(
-                `Failed to create repo ${owner}/${repo}: ${createRes.status} ${body.slice(0, 300)}`
+                `Failed to create repo ${owner}/${repo}: ${createRes.status}`
             );
         }
 

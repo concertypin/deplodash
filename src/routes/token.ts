@@ -45,6 +45,17 @@ const errorResponseSchema = z.object({
     error: z.string(),
 });
 
+// ─── Safe error patterns (messages that are safe to return to callers) ────────
+
+const KNOWN_SAFE_ERRORS: RegExp[] = [
+    /^GitHub App is not installed/i,
+    /^Failed to check (org|user) installation/i,
+    /^Failed to check repo existence/i,
+    /^Failed to create repo/i,
+    /^GitHub App token request failed/i,
+    /^Could not resolve installation/i,
+];
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api — relative paths
 
@@ -111,6 +122,24 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const [owner, name] = repo.split("/") as [string, string];
             const tokenService = new TokenService(c.env.KV);
             const agentId = c.get("agent_id")!;
+
+            // Rate limiting — per-agent throttle to protect GitHub API quota
+            const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+            if (rateLimiter) {
+                try {
+                    const { success } = await rateLimiter.limit({
+                        key: agentId,
+                    });
+                    if (!success) {
+                        return c.json(
+                            { error: "Rate limited. Try again later." },
+                            429
+                        );
+                    }
+                } catch {
+                    // Rate limiter unavailable (e.g., local dev) — proceed
+                }
+            }
 
             // Determine base URL for consent redirect
             const url = new URL(c.req.url);
@@ -180,7 +209,11 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return c.json({ error: msg }, 500);
+            // Sanitize: only pass through known-safe messages; use generic fallback
+            const safe = KNOWN_SAFE_ERRORS.some((p) => p.test(msg))
+                ? msg
+                : "An internal error occurred while processing the token request.";
+            return c.json({ error: safe }, 500);
         }
     }
 );

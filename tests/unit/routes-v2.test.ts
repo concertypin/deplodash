@@ -28,6 +28,12 @@ const errorResponseSchema = z.object({ error: z.string() });
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
 const TEST_SECRET = "test-secret-1234567890123456";
+const mockRateLimiter = {
+    limit: vi.fn<(_options: { key: string }) => Promise<{ success: boolean }>>(
+        () => Promise.resolve({ success: true })
+    ),
+};
+
 const BASE_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",
@@ -38,6 +44,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     // GITHUB_INSTALLATION_ID removed — now resolved dynamically
+    TOKEN_RATE_LIMITER: mockRateLimiter,
 };
 
 beforeEach(() => {
@@ -334,6 +341,125 @@ describe("POST /api/token — Full grant flow", () => {
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("ok");
         expect(body.token).toBe("ghs_created_repo_token");
+    });
+
+    it("returns 429 when rate limit is exceeded", async () => {
+        // Override rate limiter to reject
+        mockRateLimiter.limit.mockResolvedValueOnce({ success: false });
+
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "owner/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+
+        expect(resp.status).toBe(429);
+        const body = (await resp.json()) as Record<string, unknown>;
+        expect(body.error).toContain("Rate limited");
+    });
+
+    it("proceeds normally when rate limiter is not configured", async () => {
+        // Create an env without the rate limiter binding
+        const envWithoutRl: HonoEnv["Bindings"] = {
+            ...makeEnv(pkcs8Pem),
+            TOKEN_RATE_LIMITER: undefined as unknown as RateLimit,
+        };
+
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "norl/repo", [
+            "contents:read",
+        ]);
+
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 55, account: { login: "norl" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(jsonResponse({ name: "repo" }))
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "ghs_rl_disabled",
+                    expires_at: "2027-01-01T00:00:00Z",
+                    permissions: { contents: "read" },
+                    repository_selection: "selected",
+                })
+            );
+
+        const client = testClient(app, envWithoutRl);
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "norl/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+
+        expect(resp.status).toBe(200);
+        const body = (await resp.json()) as Record<string, unknown>;
+        expect(body.status).toBe("ok");
+        expect(body.token).toBe("ghs_rl_disabled");
+    });
+
+    it("sanitizes error responses — does not leak GitHub API body details", async () => {
+        // Cause a GitHub API error that includes response body details
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "leaky/repo", [
+            "contents:read",
+        ]);
+
+        // resolveInstallationId → GitHub API returns error with body
+        mockFetch.mockResolvedValueOnce(
+            jsonResponse({ message: "Sensitive internal error details" }, 500)
+        );
+
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "leaky/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+
+        expect(resp.status).toBe(500);
+        const body = (await resp.json()) as Record<string, unknown>;
+        // The error message should NOT contain the GitHub API response body
+        expect(body.error).not.toContain("Sensitive internal error details");
+        // It should either be a generic message or only contain safe info
+        expect(typeof body.error).toBe("string");
+    });
+
+    it("returns generic error message for non-matching error patterns", async () => {
+        // Trigger an error that does not match any KNOWN_SAFE_ERRORS pattern.
+        // Using an invalid private key causes pemToCryptoKey to throw
+        // "Unrecognised key format" which is not in the safe list.
+        const badKeyEnv = makeEnv("not-a-valid-key-at-all");
+
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "weird/repo", [
+            "contents:read",
+        ]);
+
+        const client = testClient(app, badKeyEnv);
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "weird/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+
+        expect(resp.status).toBe(500);
+        const body = (await resp.json()) as Record<string, unknown>;
+        // The error message should be the generic fallback, not the raw error
+        expect(body.error).not.toContain("not-a-valid-key");
+        expect(body.error).toContain("internal error");
     });
 });
 

@@ -20,9 +20,11 @@ export const pagesRouter = new Hono<HonoEnv>()
             // Fetch user info for the welcome page
             const user = await client.getUser();
 
-            // Fetch consent list for the dashboard
+            // Fetch consent list for the dashboard — only this user's consents
             const tokenService = new TokenService(c.env.KV);
-            const consents: ConsentItem[] = await tokenService.listConsents();
+            const consents: ConsentItem[] = await tokenService.listConsents(
+                user.login
+            );
 
             return c.html(
                 renderPage(

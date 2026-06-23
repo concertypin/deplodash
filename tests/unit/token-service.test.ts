@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:workers";
 import { TokenService } from "@/token-service";
+import { ConsentOwnershipError } from "@/errors";
 import { hashScopes } from "@/helpers";
 
 describe("TokenService", () => {
@@ -285,6 +286,89 @@ describe("TokenService", () => {
             const consents = await service.listConsents();
             expect(consents).toHaveLength(1);
         });
+
+        it("revokes consents from all agents when agentId is not provided", async () => {
+            // Create consents for multiple agents on the same repo
+            await service.recordConsent(
+                "agent-1",
+                "shared/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+            await service.recordConsent(
+                "agent-2",
+                "shared/repo",
+                ["contents:write"],
+                undefined,
+                "userB"
+            );
+            // Unrelated repo should be unaffected
+            await service.recordConsent("agent-1", "other/repo", [
+                "contents:read",
+            ]);
+
+            // Revoke without agentId (cross-agent)
+            await service.revokeAllConsentsForRepo("shared/repo");
+
+            const check1 = await service.checkConsent(
+                "agent-1",
+                "shared/repo",
+                ["contents:read"]
+            );
+            const check2 = await service.checkConsent(
+                "agent-2",
+                "shared/repo",
+                ["contents:write"]
+            );
+            const check3 = await service.checkConsent("agent-1", "other/repo", [
+                "contents:read",
+            ]);
+            expect(check1).toBe(false);
+            expect(check2).toBe(false);
+            expect(check3).toBe(true);
+        });
+
+        it("does not delete token cache keys for unrelated repos in cross-agent revoke", async () => {
+            await service.recordConsent("agent-1", "shared/repo", [
+                "contents:read",
+            ]);
+            const future = new Date(Date.now() + 3600000).toISOString();
+            await service.cacheToken(
+                "agent-1",
+                "shared/repo",
+                ["contents:read"],
+                "ghs_shared",
+                future
+            );
+            await service.recordConsent("agent-1", "other/repo", [
+                "contents:read",
+            ]);
+            await service.cacheToken(
+                "agent-1",
+                "other/repo",
+                ["contents:read"],
+                "ghs_other",
+                future
+            );
+
+            await service.revokeAllConsentsForRepo("shared/repo");
+
+            const cachedOther = await service.getCachedToken(
+                "agent-1",
+                "other/repo",
+                ["contents:read"]
+            );
+            expect(cachedOther).not.toBeNull();
+            expect(cachedOther!.token).toBe("ghs_other");
+
+            const cachedShared = await service.getCachedToken(
+                "agent-1",
+                "shared/repo",
+                ["contents:read"]
+            );
+            expect(cachedShared).toBeNull();
+        });
     });
 
     describe("token caching", () => {
@@ -462,6 +546,169 @@ describe("TokenService", () => {
             expect(second.token).toBe("ghs_1"); // Same cached value
 
             expect(callCount).toBe(1); // getToken only called once
+        });
+    });
+
+    describe("listConsents with grantedBy filter", () => {
+        it("returns only consents granted by the specified user", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+            await service.recordConsent(
+                "agent-b",
+                "beta/repo",
+                ["contents:write"],
+                undefined,
+                "userB"
+            );
+
+            const userAConsents = await service.listConsents("userA");
+            expect(userAConsents).toHaveLength(1);
+            expect(userAConsents[0]!.repo).toBe("alpha/repo");
+
+            const userBConsents = await service.listConsents("userB");
+            expect(userBConsents).toHaveLength(1);
+            expect(userBConsents[0]!.repo).toBe("beta/repo");
+        });
+
+        it("returns empty array when specified user has no consents", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+
+            const consents = await service.listConsents("nobody");
+            expect(consents).toEqual([]);
+        });
+
+        it("excludes records without granted_by when filter is active", async () => {
+            // Old-format record without granted_by
+            await service.recordConsent("agent-a", "legacy/repo", [
+                "contents:read",
+            ]);
+            await service.recordConsent(
+                "agent-b",
+                "owned/repo",
+                ["contents:write"],
+                undefined,
+                "userA"
+            );
+
+            const consents = await service.listConsents("userA");
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.repo).toBe("owned/repo");
+        });
+
+        it("returns all records when filter is not provided (backward compat)", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+            await service.recordConsent(
+                "agent-b",
+                "beta/repo",
+                ["contents:write"],
+                undefined,
+                "userB"
+            );
+            await service.recordConsent("agent-c", "legacy/repo", [
+                "contents:read",
+            ]);
+
+            const all = await service.listConsents();
+            expect(all).toHaveLength(3);
+        });
+    });
+
+    describe("revokeConsent with caller check", () => {
+        it("succeeds when caller matches granted_by", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+
+            await expect(
+                service.revokeConsent(
+                    "agent-a",
+                    "alpha/repo",
+                    ["contents:read"],
+                    "userA"
+                )
+            ).resolves.toBeUndefined();
+
+            const check = await service.checkConsent("agent-a", "alpha/repo", [
+                "contents:read",
+            ]);
+            expect(check).toBe(false);
+        });
+
+        it("throws ConsentOwnershipError when caller does not match granted_by", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+
+            await expect(
+                service.revokeConsent(
+                    "agent-a",
+                    "alpha/repo",
+                    ["contents:read"],
+                    "userB"
+                )
+            ).rejects.toThrow(ConsentOwnershipError);
+        });
+
+        it("succeeds when record has no granted_by (old format, caller provided)", async () => {
+            // Old format record without granted_by field
+            await service.recordConsent("agent-a", "legacy/repo", [
+                "contents:read",
+            ]);
+
+            await expect(
+                service.revokeConsent(
+                    "agent-a",
+                    "legacy/repo",
+                    ["contents:read"],
+                    "anyone"
+                )
+            ).resolves.toBeUndefined();
+        });
+
+        it("succeeds when caller is not provided (backward compat)", async () => {
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+
+            await expect(
+                service.revokeConsent("agent-a", "alpha/repo", [
+                    "contents:read",
+                ])
+            ).resolves.toBeUndefined();
+
+            const check = await service.checkConsent("agent-a", "alpha/repo", [
+                "contents:read",
+            ]);
+            expect(check).toBe(false);
         });
     });
 });

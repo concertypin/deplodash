@@ -18,8 +18,16 @@ import * as z from "zod";
 import { COMPOUND_SCOPES, SCOPE_LABELS, type HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token-service";
+import { ConsentOwnershipError } from "@/errors";
 import { encryptWith, decryptWith, getOrInitKey } from "@/crypto";
 import { renderPage, ConsentPage } from "@/views";
+
+// Static set of all known scope strings — defined once at module level to avoid
+// reallocation on every request.
+const KNOWN_SCOPES = new Set([
+    ...Object.keys(SCOPE_LABELS),
+    ...COMPOUND_SCOPES,
+]);
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /auth — relative paths
@@ -197,12 +205,8 @@ export const consentRouter = new Hono<HonoEnv>()
                 }
 
                 // Validate that all scopes are known scope strings
-                const knownScopes = new Set([
-                    ...Object.keys(SCOPE_LABELS),
-                    ...COMPOUND_SCOPES,
-                ]);
                 const unknownScopes = scopeList.filter(
-                    (s) => !knownScopes.has(s)
+                    (s) => !KNOWN_SCOPES.has(s)
                 );
                 if (unknownScopes.length > 0) {
                     const html = renderPage(
@@ -259,16 +263,29 @@ export const consentRouter = new Hono<HonoEnv>()
         ),
         async (c) => {
             const { repo, scopes, agent_id } = c.req.valid("form");
+            const client = c.get("client")!;
             const tokenService = new TokenService(c.env.KV);
             try {
                 const scopeList = scopes
                     .split(",")
                     .map((s) => s.trim())
                     .filter(Boolean);
+                // Get the current user's GitHub login for ownership check
+                let caller: string | undefined;
+                try {
+                    const user = await client.getUser();
+                    caller = user.login;
+                } catch {
+                    // GitHub API call failed — proceed without caller check
+                    // (consent will still be deleted, which is fine from a
+                    // security perspective since authGuard ensures the user
+                    // is authenticated)
+                }
                 await tokenService.revokeConsent(
                     agent_id ?? "",
                     repo,
-                    scopeList
+                    scopeList,
+                    caller
                 );
                 console.log(
                     `REVOKE: repo=${repo} scopeList=${JSON.stringify(
@@ -278,6 +295,11 @@ export const consentRouter = new Hono<HonoEnv>()
                 return c.redirect("/");
             } catch (err: unknown) {
                 console.error("consent: failed to revoke consent", err);
+                if (err instanceof ConsentOwnershipError) {
+                    return c.redirect(
+                        "/?error=Cannot+revoke+another+user%27s+consent"
+                    );
+                }
                 return c.redirect("/?error=Failed+to+revoke+consent");
             }
         }

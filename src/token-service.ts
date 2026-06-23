@@ -8,6 +8,7 @@
 
 import type { ConsentRecord, CachedToken, ConsentEntry } from "@/types";
 import { hashScopes } from "@/helpers";
+import { ConsentOwnershipError } from "@/errors";
 import * as z from "zod";
 const dropBufferTime = 5 * 60 * 1000;
 const CONSENT_PREFIX = "consent:";
@@ -190,11 +191,14 @@ export class TokenService {
      * List all consent records in KV.
      * Scans all keys with the `consent:` prefix and returns parsed entries.
      *
+     * When `grantedBy` is provided, only returns consents whose `granted_by`
+     * matches (records without a `granted_by` field are excluded).
+     *
      * Note: KV list is eventually consistent — recently written entries may not
      * appear immediately. Returns at most 1000 keys (single page — no cursor
      * pagination implemented yet).
      */
-    async listConsents(): Promise<ConsentEntry[]> {
+    async listConsents(grantedBy?: string): Promise<ConsentEntry[]> {
         const entries = await this.kv.list({ prefix: CONSENT_PREFIX });
         const results: ConsentEntry[] = [];
 
@@ -210,6 +214,14 @@ export class TokenService {
                 if (!value) continue;
                 const record = this.parseConsentRecord(batch[j]!.name, value);
                 if (!record) continue;
+
+                // Filter by granted_by when caller specifies a user
+                if (grantedBy) {
+                    if (!record.granted_by || record.granted_by !== grantedBy) {
+                        continue;
+                    }
+                }
+
                 const entry: ConsentEntry = {
                     repo: record.repo,
                     scopes: record.scopes,
@@ -236,15 +248,36 @@ export class TokenService {
 
     /**
      * Revoke consent for (repo, scopes).
+     *
+     * When `caller` is provided, checks that the consent record's `granted_by`
+     * matches the caller. Throws `ConsentOwnershipError` on mismatch.
      */
     async revokeConsent(
         agentId: string,
         repo: string,
-        scopes: string[]
+        scopes: string[],
+        caller?: string
     ): Promise<void> {
         const hash = await hashScopes(scopes);
+        const key = consentKey(agentId, repo, hash);
+
+        // When caller is specified, verify ownership before deleting
+        if (caller) {
+            const value = await this.kv.get(key, "json");
+            if (value) {
+                const record = this.parseConsentRecord(key, value);
+                if (
+                    record &&
+                    record.granted_by &&
+                    record.granted_by !== caller
+                ) {
+                    throw new ConsentOwnershipError();
+                }
+            }
+        }
+
         // Delete the current-format key (consent:agentId:repo:hash)
-        await this.kv.delete(consentKey(agentId, repo, hash));
+        await this.kv.delete(key);
         // Also delete the legacy-format key (consent:repo:hash) for backward
         // compatibility with records created before agent_id was added.
         // Doing both unconditionally prevents orphaned legacy keys.
@@ -254,21 +287,53 @@ export class TokenService {
     /**
      * Revoke all consents for a given repository.
      * Useful when a user wants to revoke all access to a specific repo.
+     *
+     * When `agentId` is provided, only revokes consents for that specific agent.
+     * When omitted, scans all consent keys and revokes all entries for the repo
+     * regardless of agent (handles both new-format `consent:agentId:repo:hash`
+     * and legacy-format `consent:repo:hash` keys).
      */
     async revokeAllConsentsForRepo(
         repo: string,
         agentId?: string
     ): Promise<void> {
-        const agentPrefix = agentId ? `${agentId}:` : "";
-        const consentPrefix = `${CONSENT_PREFIX}${agentPrefix}${repo}:`;
-        const tokenPrefix = `gh_token:${agentPrefix}${repo}:`;
-        const [consentEntries, tokenEntries] = await Promise.all([
-            this.kv.list({ prefix: consentPrefix }),
-            this.kv.list({ prefix: tokenPrefix }),
-        ]);
+        const consentKeysToDelete: string[] = [];
+        const tokenKeysToDelete: string[] = [];
+
+        if (agentId) {
+            // Fast path: known agent → direct prefix scan
+            const agentPrefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
+            const tokenPrefix = `gh_token:${agentId}:${repo}:`;
+            const [consentEntries, tokenEntries] = await Promise.all([
+                this.kv.list({ prefix: agentPrefix }),
+                this.kv.list({ prefix: tokenPrefix }),
+            ]);
+            consentKeysToDelete.push(...consentEntries.keys.map((k) => k.name));
+            tokenKeysToDelete.push(...tokenEntries.keys.map((k) => k.name));
+        } else {
+            // Slow path: unknown agent → scan all consent keys and filter by repo suffix.
+            // Matches both `consent:agentId:repo:hash` and `consent:repo:hash`.
+            const allEntries = await this.kv.list({
+                prefix: CONSENT_PREFIX,
+            });
+            for (const key of allEntries.keys) {
+                const name = key.name;
+                // Match: consent:repo:hash (legacy) or consent:agentId:repo:hash (new)
+                const suffix = name.startsWith(CONSENT_PREFIX)
+                    ? name.slice(CONSENT_PREFIX.length)
+                    : "";
+                if (suffix.includes(`${repo}:`)) {
+                    consentKeysToDelete.push(name);
+                    // Build the corresponding token cache key
+                    const tokenKey = name.replace(CONSENT_PREFIX, "gh_token:");
+                    tokenKeysToDelete.push(tokenKey);
+                }
+            }
+        }
+
         await Promise.all([
-            ...consentEntries.keys.map((k) => this.kv.delete(k.name)),
-            ...tokenEntries.keys.map((k) => this.kv.delete(k.name)),
+            ...consentKeysToDelete.map((k) => this.kv.delete(k)),
+            ...tokenKeysToDelete.map((k) => this.kv.delete(k)),
         ]);
     }
 

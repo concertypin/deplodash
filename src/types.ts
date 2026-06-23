@@ -40,6 +40,12 @@ export type Env = {
      * PEM-encoded RSA private key for the GitHub App (required for token issuance).
      */
     GITHUB_APP_PRIVATE_KEY: string;
+    /**
+     * Cloudflare Rate Limiting binding for /api/token endpoint.
+     * Optional — rate limiting is a best-effort guard and gracefully skipped
+     * when the binding is not available (e.g., local dev, test environments).
+     */
+    TOKEN_RATE_LIMITER?: RateLimit;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────

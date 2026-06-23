@@ -1,0 +1,12 @@
+{\"id\": \"F-001\", \"severity\": \"HIGH\", \"title\": \"Missing CSRF Protection on Consent and Revoke Forms\", \"status\": \"not_fixed\", \"location\": \"src/routes/consent.tsx\", \"cwe\": \"CWE-352\"}
+{\"id\": \"F-002\", \"severity\": \"MEDIUM\", \"title\": \"No Rate Limiting on Token Issuance\", \"status\": \"not_fixed\", \"location\": \"src/routes/token.ts\", \"cwe\": \"CWE-770\"}
+{\"id\": \"F-003\", \"severity\": \"MEDIUM\", \"title\": \"GitHub OAuth Scope 'repo' is Overly Broad\", \"status\": \"not_fixed\", \"location\": \"src/routes/auth.ts\", \"cwe\": \"CWE-272\"}
+{\"id\": \"F-004\", \"severity\": \"LOW\", \"title\": \"Unauthenticated Agent Token Revocation Function Lacks Internal Authorization\", \"status\": \"not_fixed\", \"location\": \"src/middleware/agent-auth.ts\", \"cwe\": \"CWE-285\"}
+{\"id\": \"F-005\", \"severity\": \"LOW\", \"title\": \"Sensitive Data in Log Output\", \"status\": \"new_in_branch\", \"location\": \"src/routes/consent.tsx\", \"cwe\": \"CWE-532\"}
+{\"id\": \"F-006\", \"severity\": \"LOW\", \"title\": \"Missing Content-Type Validation on POST /api/token\", \"status\": \"not_fixed\", \"location\": \"src/routes/token.ts\", \"cwe\": \"CWE-20\"}
+{\"id\": \"F-007\", \"severity\": \"LOW\", \"title\": \"No Rate Limiting on Admin Endpoints\", \"status\": \"not_fixed\", \"location\": \"src/routes/admin.ts\", \"cwe\": \"CWE-770\"}
+{\"id\": \"F-008\", \"severity\": \"LOW\", \"title\": \"listAgentTokens Exposes Internal KV Key Names in Internal API\", \"status\": \"not_fixed\", \"location\": \"src/middleware/agent-auth.ts\", \"cwe\": \"CWE-200\"}
+{\"id\": \"F-009\", \"severity\": \"MEDIUM\", \"title\": \"Agent Token Brute Force — No Rate Limiting on Auth\", \"status\": \"not_fixed\", \"location\": \"src/middleware/agent-auth.ts\", \"cwe\": \"CWE-307\"}
+{\"id\": \"F-010\", \"severity\": \"LOW\", \"title\": \"ensureRepoExists Error Leak\", \"status\": \"already_documented\", \"location\": \"src/github-app.ts\", \"cwe\": \"CWE-209\"}
+{\"id\": \"F-011\", \"severity\": \"MEDIUM\", \"title\": \"Compound Scope UI — Admin Permission Without User Awareness\", \"status\": \"new_in_branch\", \"location\": \"src/types.ts + src/routes/consent.tsx\", \"cwe\": \"CWE-20\"}
+{\"id\": \"F-012\", \"severity\": \"LOW\", \"title\": \"Agent ID Binding Not Enforced on Consent Revoke\", \"status\": \"new_in_branch\", \"location\": \"src/routes/consent.tsx\", \"cwe\": \"CWE-863\"}

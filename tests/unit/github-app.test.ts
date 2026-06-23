@@ -249,18 +249,27 @@ describe("GitHubApp", () => {
             expect(mockFetch).toHaveBeenCalledTimes(1);
         });
 
-        it("throws on unexpected org endpoint status (non-404)", async () => {
+        it("throws on unexpected org endpoint status (non-404) without leaking body", async () => {
             mockFetch.mockResolvedValue(
                 jsonResponse({ message: "Server error" }, 500)
             );
 
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(app.resolveInstallationId("err-org")).rejects.toThrow(
+            let thrown: Error | undefined;
+            try {
+                await app.resolveInstallationId("err-org");
+            } catch (e) {
+                thrown = e as Error;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toMatch(
                 /failed to check org installation/i
             );
+            // Body content should NOT be leaked
+            expect(thrown!.message).not.toContain("Server error");
         });
 
-        it("throws on unexpected user endpoint status after org 404", async () => {
+        it("throws on unexpected user endpoint status after org 404 without leaking body", async () => {
             mockFetch
                 .mockResolvedValueOnce(
                     jsonResponse({ message: "Not found" }, 404)
@@ -270,9 +279,18 @@ describe("GitHubApp", () => {
                 );
 
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(app.resolveInstallationId("err-user")).rejects.toThrow(
+            let thrown: Error | undefined;
+            try {
+                await app.resolveInstallationId("err-user");
+            } catch (e) {
+                thrown = e as Error;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toMatch(
                 /failed to check user installation/i
             );
+            // Body content should NOT be leaked
+            expect(thrown!.message).not.toContain("Server error");
         });
 
         it("throws when both org and user return 404 (not installed)", async () => {
@@ -365,15 +383,23 @@ describe("GitHubApp", () => {
             ).rejects.toThrow(/no installation id/i);
         });
 
-        it("throws on GitHub API error response", async () => {
+        it("throws on GitHub API error response without leaking body", async () => {
             mockFetch.mockResolvedValue(
                 jsonResponse({ message: "Bad credentials" }, 401)
             );
 
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(
-                app.getInstallationToken({ contents: "read" }, "42")
-            ).rejects.toThrow(/token request failed/i);
+            let thrown: Error | undefined;
+            try {
+                await app.getInstallationToken({ contents: "read" }, "42");
+            } catch (e) {
+                thrown = e as Error;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toMatch(/token request failed/i);
+            // Body content should NOT be leaked
+            expect(thrown!.message).not.toContain("Bad credentials");
+            expect(thrown!.message).not.toMatch(/401.*Bad/);
         });
     });
 
@@ -527,7 +553,7 @@ describe("GitHubApp", () => {
             expect(createCallUrl).toContain("/user/repos");
         });
 
-        it("throws on repo check error (non-404)", async () => {
+        it("throws on repo check error (non-404) without leaking body", async () => {
             mockFetch
                 // resolveInstallationId
                 .mockResolvedValueOnce(
@@ -548,12 +574,19 @@ describe("GitHubApp", () => {
                 );
 
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(
-                app.ensureRepoExists("myorg", "error-repo")
-            ).rejects.toThrow(/failed to check repo existence/i);
+            let thrown: Error | undefined;
+            try {
+                await app.ensureRepoExists("myorg", "error-repo");
+            } catch (e) {
+                thrown = e as Error;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toMatch(/failed to check repo existence/i);
+            // Body content should NOT be leaked
+            expect(thrown!.message).not.toContain("Server error");
         });
 
-        it("throws on repo creation failure", async () => {
+        it("throws on repo creation failure without leaking body", async () => {
             mockFetch
                 // resolveInstallationId
                 .mockResolvedValueOnce(
@@ -583,9 +616,16 @@ describe("GitHubApp", () => {
                 );
 
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(
-                app.ensureRepoExists("myorg", "failing-repo")
-            ).rejects.toThrow(/failed to create repo/i);
+            let thrown: Error | undefined;
+            try {
+                await app.ensureRepoExists("myorg", "failing-repo");
+            } catch (e) {
+                thrown = e as Error;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toMatch(/failed to create repo/i);
+            // Body content should NOT be leaked
+            expect(thrown!.message).not.toContain("Validation failed");
         });
     });
 });

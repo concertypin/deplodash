@@ -6,3 +6,13 @@ export class TokenExpiredError extends Error {
         this.name = "TokenExpiredError";
     }
 }
+
+/**
+ * Thrown when a caller attempts to revoke a consent they do not own.
+ */
+export class ConsentOwnershipError extends Error {
+    constructor(msg?: string) {
+        super(msg ?? "You can only revoke your own consents.");
+        this.name = "ConsentOwnershipError";
+    }
+}

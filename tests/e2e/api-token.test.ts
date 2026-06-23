@@ -17,6 +17,12 @@ import { resetKeyCache } from "@/crypto";
 
 const TEST_SECRET = "test-secret-1234567890123456";
 
+const mockRateLimiter = {
+    limit: vi.fn<(_options: { key: string }) => Promise<{ success: boolean }>>(
+        () => Promise.resolve({ success: true })
+    ),
+};
+
 const BASE_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",
@@ -26,6 +32,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_ID: "123456",
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    TOKEN_RATE_LIMITER: mockRateLimiter,
 };
 
 let pkcs8Pem = BASE_ENV.GITHUB_APP_PRIVATE_KEY;
