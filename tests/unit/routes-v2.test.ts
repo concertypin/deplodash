@@ -641,6 +641,148 @@ describe("POST /auth/consent", () => {
         expect(text).toContain("Login with GitHub");
         expect(text).toContain("/auth/github");
     });
+
+    // ─── Security: Scope validation ───────────────────────────────────────
+
+    it("rejects scopes not in the original request (subset validation)", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        // Agent requested "contents:read", but user tries to approve "admin"
+        const resp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    scopes: "admin",
+                    requested_scopes: "contents:read",
+                }),
+            }),
+            authEnv
+        );
+
+        expect(resp.status).toBe(400);
+        const text = await resp.text();
+        expect(text).toContain(
+            "Cannot approve scopes not in the original request"
+        );
+        expect(text).toContain("admin");
+    });
+
+    it("rejects unknown scope strings", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        const resp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    scopes: "bogus:scope",
+                    requested_scopes: "bogus:scope",
+                }),
+            }),
+            authEnv
+        );
+
+        expect(resp.status).toBe(400);
+        const text = await resp.text();
+        expect(text).toContain("Unknown scope");
+        expect(text).toContain("bogus:scope");
+    });
+
+    it("rejects tampered encrypted requested_scopes", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        const resp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    scopes: "contents:read",
+                    requested_scopes_enc: "invalid.encrypted.value",
+                }),
+            }),
+            authEnv
+        );
+
+        expect(resp.status).toBe(400);
+        const text = await resp.text();
+        expect(text).toContain("Invalid consent request");
+    });
+
+    it("accepts valid encrypted requested_scopes", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        // First make a GET request to obtain a valid encrypted scope value
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        expect(getResp.status).toBe(200);
+        const getText = await getResp.text();
+
+        // Extract the encrypted value from the hidden input
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        expect(encMatch).not.toBeNull();
+        const encryptedValue = encMatch![1]!;
+
+        // Now POST with the encrypted value — should succeed
+        const postResp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encryptedValue,
+                }),
+            }),
+            authEnv
+        );
+
+        expect(postResp.status).toBe(200);
+        const text = await postResp.text();
+        expect(text).toContain("Consent");
+    });
 });
 
 // ─── POST /auth/revoke — Revoke user consent ─────────────────────────────────
