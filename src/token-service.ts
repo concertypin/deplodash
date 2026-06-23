@@ -243,13 +243,12 @@ export class TokenService {
         scopes: string[]
     ): Promise<void> {
         const hash = await hashScopes(scopes);
-        const key = consentKey(agentId, repo, hash);
-        await this.kv.delete(key);
-        // Also try the legacy key format (consent:repo:hash) for backward
+        // Delete the current-format key (consent:agentId:repo:hash)
+        await this.kv.delete(consentKey(agentId, repo, hash));
+        // Also delete the legacy-format key (consent:repo:hash) for backward
         // compatibility with records created before agent_id was added.
-        if (!agentId) {
-            await this.kv.delete(`${CONSENT_PREFIX}${repo}:${hash}`);
-        }
+        // Doing both unconditionally prevents orphaned legacy keys.
+        await this.kv.delete(`${CONSENT_PREFIX}${repo}:${hash}`);
     }
 
     /**

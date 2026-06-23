@@ -567,6 +567,7 @@ describe("POST /auth/consent", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "contents:read",
+                    requested_scopes: "contents:read",
                     agent_id: "test-agent",
                 }),
             }),
@@ -614,6 +615,7 @@ describe("POST /auth/consent", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "contents:read",
+                    requested_scopes: "contents:read",
                 }),
             }),
             authEnv

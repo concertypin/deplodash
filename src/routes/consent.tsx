@@ -38,15 +38,15 @@ export const consentRouter = new Hono<HonoEnv>()
         ),
         async (c) => {
             const { repo, scopes, agent_id } = c.req.valid("query");
-            // Encrypt the requested scopes so they cannot be tampered with on the client side.
-            // The POST handler will decrypt and verify against the original request.
-            // If encryption fails, we still render but without the encrypted field;
-            // the POST handler will reject requests missing the encrypted field
-            // when ENCRYPTION_SECRET is configured, so this is safe.
+            // Encrypt the requested scopes + context so they cannot be tampered with.
+            // The POST handler will decrypt and verify repo+agent_id match the form.
+            // If encryption fails, the encrypted field is omitted; the POST handler
+            // will reject requests missing it when ENCRYPTION_SECRET is configured.
             let requestedScopesEnc: string | undefined;
             try {
                 const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
-                requestedScopesEnc = await encryptWith(key, scopes);
+                const payload = JSON.stringify({ scopes, repo, agent_id });
+                requestedScopesEnc = await encryptWith(key, payload);
             } catch {
                 // Encryption failed — proceed without protection (best-effort)
             }
@@ -84,8 +84,10 @@ export const consentRouter = new Hono<HonoEnv>()
                 requested_scopes_enc,
                 agent_id,
             } = c.req.valid("form");
-            // If encrypted requested_scopes is provided, decrypt and verify it.
-            // This prevents client-side tampering of the hidden field.
+            // Validate authenticated consent context.
+            // If encrypted data is provided, decrypt and verify repo+agent_id match.
+            // When ENCRYPTION_SECRET is configured but no encrypted field is submitted,
+            // the request is rejected (prevents subset-validation bypass).
             let requested_scopes = rawRequestedScopes;
             if (requested_scopes_enc) {
                 try {
@@ -94,10 +96,21 @@ export const consentRouter = new Hono<HonoEnv>()
                         key,
                         requested_scopes_enc
                     );
-                    if (decrypted === null) {
-                        throw new Error("Decryption returned null");
+                    if (decrypted === null) throw new Error("Decrypt failed");
+                    const ctx = JSON.parse(decrypted) as {
+                        scopes: string;
+                        repo?: string;
+                        agent_id?: string;
+                    };
+                    // Verify repo binding — prevents cross-repo replay
+                    if (ctx.repo && ctx.repo !== repo) {
+                        throw new Error("Repo mismatch");
                     }
-                    requested_scopes = decrypted;
+                    // Verify agent_id binding when present — prevents cross-agent redirect
+                    if (ctx.agent_id && ctx.agent_id !== agent_id) {
+                        throw new Error("Agent mismatch");
+                    }
+                    requested_scopes = ctx.scopes;
                 } catch {
                     const html = renderPage(
                         <ConsentPage
@@ -108,6 +121,16 @@ export const consentRouter = new Hono<HonoEnv>()
                     );
                     return c.html(html, 400);
                 }
+            } else if (!rawRequestedScopes && c.env.ENCRYPTION_SECRET) {
+                // Encryption configured but no scope info submitted — reject
+                const html = renderPage(
+                    <ConsentPage
+                        repo={repo}
+                        scopes=""
+                        error="Invalid consent request. Please try again from the agent's link."
+                    />
+                );
+                return c.html(html, 400);
             }
             const tokenService = new TokenService(c.env.KV);
             try {
