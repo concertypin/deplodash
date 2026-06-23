@@ -176,14 +176,16 @@ describe("POST /api/token — Full grant flow", () => {
         await registerAgentToken(
             BASE_ENV.KV,
             "flow-agent-token",
-            "flow-agent",
+            "test-agent",
             "Flow Test Agent"
         );
     });
 
     it("returns 200 with token when consent exists", async () => {
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("owner/repo", ["contents:read"]);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
 
         mockFetch
             // resolveInstallationId → org installation
@@ -239,7 +241,7 @@ describe("POST /api/token — Full grant flow", () => {
 
     it("returns 200 with token for repo with admin scope", async () => {
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("admin/repo", ["admin"]);
+        await tokenService.recordConsent("test-agent", "admin/repo", ["admin"]);
 
         mockFetch
             .mockResolvedValueOnce(
@@ -281,7 +283,9 @@ describe("POST /api/token — Full grant flow", () => {
 
     it("creates repo and issues token when repo does not exist", async () => {
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("neworg/new-repo", ["contents:write"]);
+        await tokenService.recordConsent("test-agent", "neworg/new-repo", [
+            "contents:write",
+        ]);
 
         mockFetch
             // resolveInstallationId
@@ -432,9 +436,13 @@ describe("GET / (pages)", () => {
     it("records consent and listConsents retrieves it", async () => {
         // Verify that TokenService can record and list consents
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("owner/repo", ["contents:read"]);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
         expect(
-            await tokenService.checkConsent("owner/repo", ["contents:read"])
+            await tokenService.checkConsent("test-agent", "owner/repo", [
+                "contents:read",
+            ])
         ).toBe(true);
 
         const consents = await tokenService.listConsents();
@@ -559,6 +567,7 @@ describe("POST /auth/consent", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "contents:read",
+                    agent_id: "test-agent",
                 }),
             }),
             authEnv
@@ -570,9 +579,11 @@ describe("POST /auth/consent", () => {
 
         // Verify consent was stored in KV
         const tokenService = new TokenService(env.KV);
-        const hasConsent = await tokenService.checkConsent("owner/repo", [
-            "contents:read",
-        ]);
+        const hasConsent = await tokenService.checkConsent(
+            "test-agent",
+            "owner/repo",
+            ["contents:read"]
+        );
         expect(hasConsent).toBe(true);
 
         // Also verify via listConsents (same method the pages handler uses)
@@ -643,7 +654,9 @@ describe("POST /auth/revoke", () => {
     it("revokes consent and redirects to /", async () => {
         // Pre-record a consent to revoke
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("owner/repo", ["contents:read"]);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
 
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,
@@ -662,6 +675,7 @@ describe("POST /auth/revoke", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "contents:read",
+                    agent_id: "test-agent",
                 }),
             }),
             authEnv
@@ -671,9 +685,11 @@ describe("POST /auth/revoke", () => {
         expect(resp.headers.get("Location")).toBe("/");
 
         // Verify consent was removed
-        const hasConsent = await tokenService.checkConsent("owner/repo", [
-            "contents:read",
-        ]);
+        const hasConsent = await tokenService.checkConsent(
+            "test-agent",
+            "owner/repo",
+            ["contents:read"]
+        );
         expect(hasConsent).toBe(false);
     });
 

@@ -18,34 +18,50 @@ describe("TokenService", () => {
 
     describe("consent", () => {
         it("returns false when no consent exists", async () => {
-            const result = await service.checkConsent("owner/repo", [
-                "contents:read",
-            ]);
+            const result = await service.checkConsent(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(result).toBe(false);
         });
 
         it("returns true after recording consent", async () => {
-            await service.recordConsent("owner/repo", ["contents:read"]);
-            const result = await service.checkConsent("owner/repo", [
+            await service.recordConsent("test-agent", "owner/repo", [
                 "contents:read",
             ]);
+            const result = await service.checkConsent(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(result).toBe(true);
         });
 
         it("returns false for different scopes after recording consent", async () => {
-            await service.recordConsent("owner/repo", ["contents:read"]);
-            const result = await service.checkConsent("owner/repo", [
-                "contents:write",
+            await service.recordConsent("test-agent", "owner/repo", [
+                "contents:read",
             ]);
+            const result = await service.checkConsent(
+                "test-agent",
+                "owner/repo",
+                ["contents:write"]
+            );
             expect(result).toBe(false);
         });
 
         it("returns false after revoking consent", async () => {
-            await service.recordConsent("owner/repo", ["contents:read"]);
-            await service.revokeConsent("owner/repo", ["contents:read"]);
-            const result = await service.checkConsent("owner/repo", [
+            await service.recordConsent("test-agent", "owner/repo", [
                 "contents:read",
             ]);
+            await service.revokeConsent("test-agent", "owner/repo", [
+                "contents:read",
+            ]);
+            const result = await service.checkConsent(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(result).toBe(false);
         });
 
@@ -53,7 +69,7 @@ describe("TokenService", () => {
             const scopes = ["contents:read"];
             const repo = "broken/repo";
             const hash = await hashScopes(scopes);
-            const key = `consent:${repo}:${hash}`;
+            const key = `consent:test-agent:${repo}:${hash}`;
             await kv.put(
                 key,
                 JSON.stringify({
@@ -66,6 +82,7 @@ describe("TokenService", () => {
                     repo,
                     scopes,
                     baseUrl: "http://test",
+                    agentId: "test-agent",
                 },
                 () =>
                     Promise.resolve({
@@ -84,14 +101,14 @@ describe("TokenService", () => {
 
     describe("recordConsent with agentId", () => {
         it("stores the agent_id when provided", async () => {
-            await service.recordConsent(
-                "owner/repo",
-                ["contents:read"],
-                "agent-123"
-            );
-            const result = await service.checkConsent("owner/repo", [
+            await service.recordConsent("agent-123", "owner/repo", [
                 "contents:read",
             ]);
+            const result = await service.checkConsent(
+                "agent-123",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(result).toBe(true);
 
             // Verify the agent_id is stored by listing consents
@@ -108,7 +125,9 @@ describe("TokenService", () => {
         });
 
         it("returns a single consent record", async () => {
-            await service.recordConsent("alpha/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "alpha/repo", [
+                "contents:read",
+            ]);
 
             const consents = await service.listConsents();
             expect(consents).toHaveLength(1);
@@ -118,9 +137,13 @@ describe("TokenService", () => {
         });
 
         it("returns multiple consent records", async () => {
-            await service.recordConsent("alpha/repo", ["contents:read"]);
-            await service.recordConsent("beta/repo", ["contents:write"]);
-            await service.recordConsent("gamma/repo", ["admin"]);
+            await service.recordConsent("test-agent", "alpha/repo", [
+                "contents:read",
+            ]);
+            await service.recordConsent("test-agent", "beta/repo", [
+                "contents:write",
+            ]);
+            await service.recordConsent("test-agent", "gamma/repo", ["admin"]);
 
             const consents = await service.listConsents();
             expect(consents).toHaveLength(3);
@@ -129,10 +152,14 @@ describe("TokenService", () => {
         });
 
         it("sorts results by granted_at descending (newest first)", async () => {
-            await service.recordConsent("old/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "old/repo", [
+                "contents:read",
+            ]);
             // Small delay to ensure different timestamps
             await new Promise((r) => setTimeout(r, 50));
-            await service.recordConsent("new/repo", ["contents:write"]);
+            await service.recordConsent("test-agent", "new/repo", [
+                "contents:write",
+            ]);
 
             const consents = await service.listConsents();
             expect(consents).toHaveLength(2);
@@ -150,7 +177,9 @@ describe("TokenService", () => {
             );
 
             // Also write a new-format record
-            await service.recordConsent("new/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "new/repo", [
+                "contents:read",
+            ]);
 
             const consents = await service.listConsents();
             // Old format without repo/scopes should be skipped
@@ -164,7 +193,9 @@ describe("TokenService", () => {
                 "consent:orphan:hash1",
                 JSON.stringify({ some_other_field: true })
             );
-            await service.recordConsent("valid/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "valid/repo", [
+                "contents:read",
+            ]);
 
             const consents = await service.listConsents();
             expect(consents).toHaveLength(1);
@@ -174,30 +205,47 @@ describe("TokenService", () => {
 
     describe("revokeAllConsentsForRepo", () => {
         it("revokes all consents for a given repo", async () => {
-            await service.recordConsent("target/repo", ["contents:read"]);
-            await service.recordConsent("target/repo", ["contents:write"]);
-            await service.recordConsent("other/repo", ["contents:read"]);
-
-            await service.revokeAllConsentsForRepo("target/repo");
-
-            const check1 = await service.checkConsent("target/repo", [
+            await service.recordConsent("test-agent", "target/repo", [
                 "contents:read",
             ]);
-            const check2 = await service.checkConsent("target/repo", [
+            await service.recordConsent("test-agent", "target/repo", [
                 "contents:write",
             ]);
-            const check3 = await service.checkConsent("other/repo", [
+            await service.recordConsent("test-agent", "other/repo", [
                 "contents:read",
             ]);
+
+            await service.revokeAllConsentsForRepo("target/repo", "test-agent");
+
+            const check1 = await service.checkConsent(
+                "test-agent",
+                "target/repo",
+                ["contents:read"]
+            );
+            const check2 = await service.checkConsent(
+                "test-agent",
+                "target/repo",
+                ["contents:write"]
+            );
+            const check3 = await service.checkConsent(
+                "test-agent",
+                "other/repo",
+                ["contents:read"]
+            );
             expect(check1).toBe(false);
             expect(check2).toBe(false);
             expect(check3).toBe(true);
         });
 
         it("does nothing when repo has no consents", async () => {
-            await service.recordConsent("other/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "other/repo", [
+                "contents:read",
+            ]);
 
-            await service.revokeAllConsentsForRepo("nonexistent/repo");
+            await service.revokeAllConsentsForRepo(
+                "nonexistent/repo",
+                "test-agent"
+            );
 
             // Other repo should be unaffected
             const consents = await service.listConsents();
@@ -207,23 +255,28 @@ describe("TokenService", () => {
 
     describe("token caching", () => {
         it("returns null when no cached token exists", async () => {
-            const result = await service.getCachedToken("owner/repo", [
-                "contents:read",
-            ]);
+            const result = await service.getCachedToken(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(result).toBeNull();
         });
 
         it("returns cached token after caching", async () => {
             const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
             await service.cacheToken(
+                "test-agent",
                 "owner/repo",
                 ["contents:read"],
                 "ghs_test",
                 future
             );
-            const cached = await service.getCachedToken("owner/repo", [
-                "contents:read",
-            ]);
+            const cached = await service.getCachedToken(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(cached).not.toBeNull();
             expect(cached!.token).toBe("ghs_test");
         });
@@ -231,14 +284,17 @@ describe("TokenService", () => {
         it("returns null for expired cached token", async () => {
             const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
             await service.cacheToken(
+                "test-agent",
                 "owner/repo",
                 ["contents:read"],
                 "ghs_test",
                 past
             );
-            const cached = await service.getCachedToken("owner/repo", [
-                "contents:read",
-            ]);
+            const cached = await service.getCachedToken(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(cached).toBeNull();
         });
 
@@ -248,14 +304,17 @@ describe("TokenService", () => {
                 Date.now() + 4 * 60 * 1000
             ).toISOString();
             await service.cacheToken(
+                "test-agent",
                 "owner/repo",
                 ["contents:read"],
                 "ghs_near_expiry",
                 nearExpiry
             );
-            const cached = await service.getCachedToken("owner/repo", [
-                "contents:read",
-            ]);
+            const cached = await service.getCachedToken(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(cached).toBeNull();
         });
 
@@ -265,14 +324,17 @@ describe("TokenService", () => {
                 Date.now() + 24 * 60 * 60 * 1000
             ).toISOString();
             await service.cacheToken(
+                "test-agent",
                 "owner/repo",
                 ["contents:read"],
                 "ghs_long",
                 farFuture
             );
-            const cached = await service.getCachedToken("owner/repo", [
-                "contents:read",
-            ]);
+            const cached = await service.getCachedToken(
+                "test-agent",
+                "owner/repo",
+                ["contents:read"]
+            );
             expect(cached).not.toBeNull();
             expect(cached!.token).toBe("ghs_long");
         });
@@ -285,6 +347,7 @@ describe("TokenService", () => {
                     repo: "owner/repo",
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
+                    agentId: "test-agent",
                 },
                 () =>
                     Promise.resolve({
@@ -301,12 +364,15 @@ describe("TokenService", () => {
         });
 
         it("returns ok when consent exists", async () => {
-            await service.recordConsent("owner/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "owner/repo", [
+                "contents:read",
+            ]);
             const result = await service.requestToken(
                 {
                     repo: "owner/repo",
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
+                    agentId: "test-agent",
                 },
                 () =>
                     Promise.resolve({
@@ -321,7 +387,9 @@ describe("TokenService", () => {
         });
 
         it("returns cached token on subsequent calls", async () => {
-            await service.recordConsent("owner/repo", ["contents:read"]);
+            await service.recordConsent("test-agent", "owner/repo", [
+                "contents:read",
+            ]);
             let callCount = 0;
             const getToken = () => {
                 callCount++;
@@ -337,6 +405,7 @@ describe("TokenService", () => {
                     repo: "owner/repo",
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
+                    agentId: "test-agent",
                 },
                 getToken
             );
@@ -350,6 +419,7 @@ describe("TokenService", () => {
                     repo: "owner/repo",
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
+                    agentId: "test-agent",
                 },
                 getToken
             );

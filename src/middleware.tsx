@@ -38,7 +38,7 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                         setCookie(c, COOKIE_NAME, "", {
                             path: "/",
                             httpOnly: true,
-                            sameSite: "Lax",
+                            sameSite: "Strict",
                             secure: true,
                             maxAge: 0,
                         });
@@ -73,7 +73,7 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                             setCookie(c, COOKIE_NAME, encrypted, {
                                 path: "/",
                                 httpOnly: true,
-                                sameSite: "Lax",
+                                sameSite: "Strict",
                                 secure: isHttps,
                                 maxAge: MAX_AGE_SECS,
                             });
@@ -85,7 +85,7 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                             setCookie(c, COOKIE_NAME, "", {
                                 path: "/",
                                 httpOnly: true,
-                                sameSite: "Lax",
+                                sameSite: "Strict",
                                 secure: true,
                                 maxAge: 0,
                             });

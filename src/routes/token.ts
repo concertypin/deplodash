@@ -110,6 +110,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const gh = new GitHubApp(appId, privateKey);
             const [owner, name] = repo.split("/") as [string, string];
             const tokenService = new TokenService(c.env.KV);
+            const agentId = c.get("agent_id")!;
 
             // Determine base URL for consent redirect
             const url = new URL(c.req.url);
@@ -117,12 +118,14 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
             // Check consent — supports granular approval (user may have approved a subset)
             const effectiveScopes: string[] | null =
-                await tokenService.findConsentScopes(repo, scopes);
+                await tokenService.findConsentScopes(agentId, repo, scopes);
 
             if (!effectiveScopes) {
                 // No matching consent found — check if the user has approved ANY scopes for this repo
-                const approvedScopes =
-                    await tokenService.getAllApprovedScopes(repo);
+                const approvedScopes = await tokenService.getAllApprovedScopes(
+                    agentId,
+                    repo
+                );
                 const consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
                     `&scopes=${encodeURIComponent(scopes.join(","))}`;
@@ -144,6 +147,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
             const cached = await tokenService.getCachedToken(
+                agentId,
                 repo,
                 effectiveScopes
             );
@@ -160,6 +164,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             await gh.ensureRepoExists(owner, name);
             const tokenResult = await gh.requestToken(effectiveScopes, owner);
             await tokenService.cacheToken(
+                agentId,
                 repo,
                 effectiveScopes,
                 tokenResult.token,

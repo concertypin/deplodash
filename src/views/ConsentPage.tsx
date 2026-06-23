@@ -14,6 +14,7 @@ interface ConsentPageProps {
     scopes: string;
     error?: string;
     success?: boolean;
+    agentId?: string;
 }
 
 /**
@@ -59,6 +60,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
     scopes,
     error,
     success,
+    agentId,
 }) => {
     const scopeList = scopes
         .split(",")
@@ -117,6 +119,13 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                         name="requested_scopes"
                                         value={scopes}
                                     />
+                                    {agentId && (
+                                        <input
+                                            type="hidden"
+                                            name="agent_id"
+                                            value={agentId}
+                                        />
+                                    )}
 
                                     <div class="bg-base-300 rounded-lg p-4 mb-4">
                                         <div class="font-semibold mb-3">

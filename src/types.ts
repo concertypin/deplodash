@@ -257,6 +257,8 @@ export type ConsentEntry = {
     requested_scopes?: string;
     /** GitHub user login who granted this consent. */
     granted_by?: string;
+    /** Agent ID that this consent was recorded for. */
+    agent_id?: string;
 };
 
 /**

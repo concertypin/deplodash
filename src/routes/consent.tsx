@@ -15,8 +15,7 @@
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
-import { SCOPE_LABELS } from "@/types";
-import type { HonoEnv } from "@/types";
+import { SCOPE_LABELS, type HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token-service";
 import { renderPage, ConsentPage } from "@/views";
@@ -33,12 +32,17 @@ export const consentRouter = new Hono<HonoEnv>()
             z.object({
                 repo: z.string().min(1),
                 scopes: z.string().min(1),
+                agent_id: z.string().optional(),
             })
         ),
         (c) => {
-            const { repo, scopes } = c.req.valid("query");
+            const { repo, scopes, agent_id } = c.req.valid("query");
             const html = renderPage(
-                <ConsentPage repo={repo} scopes={scopes} />
+                <ConsentPage
+                    repo={repo}
+                    scopes={scopes}
+                    {...(agent_id ? { agentId: agent_id } : {})}
+                />
             );
             return c.html(html);
         }
@@ -54,6 +58,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 // Optional because unchecking all checkboxes means nothing is posted for scopes.
                 scopes: z.union([z.string(), z.array(z.string())]).optional(),
                 requested_scopes: z.string().optional(),
+                agent_id: z.string().optional(),
             })
         ),
         async (c) => {
@@ -61,6 +66,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 repo,
                 scopes: rawScopes,
                 requested_scopes,
+                agent_id,
             } = c.req.valid("form");
             const tokenService = new TokenService(c.env.KV);
             try {
@@ -149,9 +155,9 @@ export const consentRouter = new Hono<HonoEnv>()
                 }
 
                 await tokenService.recordConsent(
+                    agent_id ?? "",
                     repo,
                     scopeList,
-                    undefined,
                     requestedList,
                     grantedBy
                 );
@@ -185,17 +191,27 @@ export const consentRouter = new Hono<HonoEnv>()
             z.object({
                 repo: z.string().min(1),
                 scopes: z.string().min(1),
+                agent_id: z.string().optional(),
             })
         ),
         async (c) => {
-            const { repo, scopes } = c.req.valid("form");
+            const { repo, scopes, agent_id } = c.req.valid("form");
             const tokenService = new TokenService(c.env.KV);
             try {
                 const scopeList = scopes
                     .split(",")
                     .map((s) => s.trim())
                     .filter(Boolean);
-                await tokenService.revokeConsent(repo, scopeList);
+                await tokenService.revokeConsent(
+                    agent_id ?? "",
+                    repo,
+                    scopeList
+                );
+                console.log(
+                    `REVOKE: repo=${repo} scopeList=${JSON.stringify(
+                        scopeList
+                    )} scopes=${scopes}`
+                );
                 return c.redirect("/");
             } catch (err: unknown) {
                 console.error("consent: failed to revoke consent", err);

@@ -94,7 +94,9 @@ describe("API token E2E flow", () => {
         );
 
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("owner/repo", ["contents:read"]);
+        await tokenService.recordConsent("agent-1", "owner/repo", [
+            "contents:read",
+        ]);
 
         mockFetch
             .mockResolvedValueOnce(
@@ -160,7 +162,9 @@ describe("API token E2E flow", () => {
         );
 
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("neworg/new-repo", ["contents:write"]);
+        await tokenService.recordConsent("agent-2", "neworg/new-repo", [
+            "contents:write",
+        ]);
 
         mockFetch
             .mockResolvedValueOnce(

@@ -65,7 +65,7 @@ export const oauthRouter = new Hono<HonoEnv>()
             setCookie(c, COOKIE_NAME, encryptedSession, {
                 path: "/",
                 httpOnly: true,
-                sameSite: "Lax",
+                sameSite: "Strict",
                 secure: isHttps,
                 maxAge: MAX_AGE_SECS,
             });
@@ -83,7 +83,7 @@ export const oauthRouter = new Hono<HonoEnv>()
             path: "/",
             httpOnly: true,
             secure: true,
-            sameSite: "Lax",
+            sameSite: "Strict",
             maxAge: 0,
         });
         return c.redirect("/");
