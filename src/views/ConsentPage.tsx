@@ -15,6 +15,8 @@ interface ConsentPageProps {
     error?: string;
     success?: boolean;
     agentId?: string;
+    /** Encrypted requested scopes — prevents client-side tampering of the hidden field. */
+    requestedScopesEnc?: string;
 }
 
 /**
@@ -61,6 +63,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
     error,
     success,
     agentId,
+    requestedScopesEnc,
 }) => {
     const scopeList = scopes
         .split(",")
@@ -119,6 +122,13 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                         name="requested_scopes"
                                         value={scopes}
                                     />
+                                    {requestedScopesEnc && (
+                                        <input
+                                            type="hidden"
+                                            name="requested_scopes_enc"
+                                            value={requestedScopesEnc}
+                                        />
+                                    )}
                                     {agentId && (
                                         <input
                                             type="hidden"

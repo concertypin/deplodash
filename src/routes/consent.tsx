@@ -15,9 +15,10 @@
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
-import { SCOPE_LABELS, type HonoEnv } from "@/types";
+import { COMPOUND_SCOPES, SCOPE_LABELS, type HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token-service";
+import { encryptWith, decryptWith, getOrInitKey } from "@/crypto";
 import { renderPage, ConsentPage } from "@/views";
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -35,12 +36,22 @@ export const consentRouter = new Hono<HonoEnv>()
                 agent_id: z.string().optional(),
             })
         ),
-        (c) => {
+        async (c) => {
             const { repo, scopes, agent_id } = c.req.valid("query");
+            // Encrypt the requested scopes so they cannot be tampered with on the client side.
+            // The POST handler will decrypt and verify against the original request.
+            let requestedScopesEnc: string | undefined;
+            try {
+                const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
+                requestedScopesEnc = await encryptWith(key, scopes);
+            } catch {
+                // Encryption failed — proceed without protection (best-effort)
+            }
             const html = renderPage(
                 <ConsentPage
                     repo={repo}
                     scopes={scopes}
+                    {...(requestedScopesEnc ? { requestedScopesEnc } : {})}
                     {...(agent_id ? { agentId: agent_id } : {})}
                 />
             );
@@ -58,6 +69,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 // Optional because unchecking all checkboxes means nothing is posted for scopes.
                 scopes: z.union([z.string(), z.array(z.string())]).optional(),
                 requested_scopes: z.string().optional(),
+                requested_scopes_enc: z.string().optional(),
                 agent_id: z.string().optional(),
             })
         ),
@@ -65,9 +77,35 @@ export const consentRouter = new Hono<HonoEnv>()
             const {
                 repo,
                 scopes: rawScopes,
-                requested_scopes,
+                requested_scopes: rawRequestedScopes,
+                requested_scopes_enc,
                 agent_id,
             } = c.req.valid("form");
+            // If encrypted requested_scopes is provided, decrypt and verify it.
+            // This prevents client-side tampering of the hidden field.
+            let requested_scopes = rawRequestedScopes;
+            if (requested_scopes_enc) {
+                try {
+                    const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
+                    const decrypted = await decryptWith(
+                        key,
+                        requested_scopes_enc
+                    );
+                    if (decrypted === null) {
+                        throw new Error("Decryption returned null");
+                    }
+                    requested_scopes = decrypted;
+                } catch {
+                    const html = renderPage(
+                        <ConsentPage
+                            repo={repo}
+                            scopes=""
+                            error="Invalid consent request. Please try again from the agent's link."
+                        />
+                    );
+                    return c.html(html, 400);
+                }
+            }
             const tokenService = new TokenService(c.env.KV);
             try {
                 // Handle empty scopes — no checkboxes were checked
@@ -134,12 +172,12 @@ export const consentRouter = new Hono<HonoEnv>()
                 }
 
                 // Validate that all scopes are known scope strings
-                const knownScopes = new Set(Object.keys(SCOPE_LABELS));
+                const knownScopes = new Set([
+                    ...Object.keys(SCOPE_LABELS),
+                    ...COMPOUND_SCOPES,
+                ]);
                 const unknownScopes = scopeList.filter(
-                    (s) =>
-                        !knownScopes.has(s) &&
-                        s !== "admin" &&
-                        s !== "contents:write+workflows:write"
+                    (s) => !knownScopes.has(s)
                 );
                 if (unknownScopes.length > 0) {
                     const html = renderPage(

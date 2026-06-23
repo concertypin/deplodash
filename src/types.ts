@@ -165,6 +165,18 @@ export const SCOPE_LABELS: Record<string, string> = {
 };
 
 /**
+ * Compound/builtin scopes that are not individual permission scopes
+ * but rather preset combinations of multiple scopes.
+ *
+ * These are valid scope values that exist in the system but are not
+ * part of SCOPE_LABELS (which only contains individual permission scopes).
+ */
+export const COMPOUND_SCOPES = new Set([
+    "admin",
+    "contents:write+workflows:write",
+]);
+
+/**
  * Scope categories for UI grouping.
  * Keyed by category ID.
  */
