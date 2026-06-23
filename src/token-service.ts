@@ -18,6 +18,7 @@ const consentRecordSchema = z.object({
     granted_at: z.string().min(1),
     agent_id: z.string().optional(),
     requested_scopes: z.string().optional(),
+    granted_by: z.string().optional(),
 });
 
 // ─── KV prefix helpers ───────────────────────────────────────────────────────

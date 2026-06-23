@@ -136,6 +136,40 @@ describe("TokenService", () => {
             expect(consents[0]!.granted_at).toBeTruthy();
         });
 
+        it("includes granted_by in listConsents when set", async () => {
+            await service.recordConsent(
+                "test-agent",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "testuser"
+            );
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.granted_by).toBe("testuser");
+        });
+
+        it("omits granted_by in listConsents when not set", async () => {
+            await service.recordConsent("test-agent", "alpha/repo", [
+                "contents:read",
+            ]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.granted_by).toBeUndefined();
+        });
+
+        it("includes agent_id in listConsents when set", async () => {
+            await service.recordConsent("test-agent", "alpha/repo", [
+                "contents:read",
+            ]);
+
+            const consents = await service.listConsents();
+            expect(consents).toHaveLength(1);
+            expect(consents[0]!.agent_id).toBe("test-agent");
+        });
+
         it("returns multiple consent records", async () => {
             await service.recordConsent("test-agent", "alpha/repo", [
                 "contents:read",
