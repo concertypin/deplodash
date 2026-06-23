@@ -783,6 +783,64 @@ describe("POST /auth/consent", () => {
         const text = await postResp.text();
         expect(text).toContain("Consent");
     });
+
+    it("accepts subset approval with encrypted multi-scope request", async () => {
+        // Agent requests multiple scopes, user approves only a subset
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        // GET with multiple scopes
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read,issues:write,admin&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        expect(getResp.status).toBe(200);
+
+        // Extract encrypted value
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        expect(encMatch).not.toBeNull();
+        const encryptedValue = encMatch![1]!;
+
+        // POST with only a subset of the requested scopes
+        const postResp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encryptedValue,
+                }),
+            }),
+            authEnv
+        );
+
+        expect(postResp.status).toBe(200);
+        const text = await postResp.text();
+        expect(text).toContain("Consent");
+
+        // Verify only the approved scope was stored
+        const tokenService = new TokenService(env.KV);
+        const hasConsent = await tokenService.checkConsent(
+            "test-agent",
+            "owner/repo",
+            ["contents:read"]
+        );
+        expect(hasConsent).toBe(true);
+    });
 });
 
 // ─── POST /auth/revoke — Revoke user consent ─────────────────────────────────

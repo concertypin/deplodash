@@ -40,6 +40,9 @@ export const consentRouter = new Hono<HonoEnv>()
             const { repo, scopes, agent_id } = c.req.valid("query");
             // Encrypt the requested scopes so they cannot be tampered with on the client side.
             // The POST handler will decrypt and verify against the original request.
+            // If encryption fails, we still render but without the encrypted field;
+            // the POST handler will reject requests missing the encrypted field
+            // when ENCRYPTION_SECRET is configured, so this is safe.
             let requestedScopesEnc: string | undefined;
             try {
                 const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);

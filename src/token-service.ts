@@ -216,7 +216,8 @@ export class TokenService {
                     granted_at: record.granted_at,
                 };
                 if (record.granted_by) entry.granted_by = record.granted_by;
-                if (record.agent_id) entry.agent_id = record.agent_id;
+                if (record.agent_id !== undefined)
+                    entry.agent_id = record.agent_id;
                 if (record.requested_scopes)
                     entry.requested_scopes = record.requested_scopes;
                 results.push(entry);
@@ -244,6 +245,11 @@ export class TokenService {
         const hash = await hashScopes(scopes);
         const key = consentKey(agentId, repo, hash);
         await this.kv.delete(key);
+        // Also try the legacy key format (consent:repo:hash) for backward
+        // compatibility with records created before agent_id was added.
+        if (!agentId) {
+            await this.kv.delete(`${CONSENT_PREFIX}${repo}:${hash}`);
+        }
     }
 
     /**
