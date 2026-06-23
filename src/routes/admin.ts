@@ -10,6 +10,15 @@ import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { sessionMiddleware } from "@/middleware";
 import { listAgentTokens, revokeAgentToken } from "@/middleware/agent-auth";
+import { GitHubClient } from "@/github";
+
+function isAdminUser(login: string, adminUsers: string | undefined): boolean {
+    if (!adminUsers) return false;
+    return adminUsers
+        .split(",")
+        .map((u) => u.trim().toLowerCase())
+        .includes(login.toLowerCase());
+}
 
 export const adminRouter = new Hono<HonoEnv>();
 
@@ -24,6 +33,17 @@ adminRouter.get("/agent/list", async (c) => {
     const ghToken = c.get("gh_token");
     if (!ghToken) {
         return c.json({ error: "Not authenticated" }, 401);
+    }
+
+    // Check admin authorization
+    try {
+        const ghClient = new GitHubClient(ghToken);
+        const user = await ghClient.getUser();
+        if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
+            return c.json({ error: "Forbidden" }, 403);
+        }
+    } catch {
+        return c.json({ error: "Failed to verify admin access" }, 403);
     }
 
     const tokens = await listAgentTokens(c.env.KV);
@@ -46,6 +66,17 @@ adminRouter.post("/agent/revoke", async (c) => {
     const ghToken = c.get("gh_token");
     if (!ghToken) {
         return c.json({ error: "Not authenticated" }, 401);
+    }
+
+    // Check admin authorization
+    try {
+        const ghClient = new GitHubClient(ghToken);
+        const user = await ghClient.getUser();
+        if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
+            return c.json({ error: "Forbidden" }, 403);
+        }
+    } catch {
+        return c.json({ error: "Failed to verify admin access" }, 403);
     }
 
     let body: { token?: string };

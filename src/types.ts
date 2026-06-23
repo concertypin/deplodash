@@ -24,6 +24,11 @@ export type Env = {
      */
     GITHUB_TOKEN?: string;
     /**
+     * Comma-separated list of GitHub usernames allowed to access admin endpoints.
+     * If not set or empty, admin endpoints return 403.
+     */
+    GITHUB_ADMIN_USERS?: string;
+    /**
      * Cloudflare KV namespace for agent tokens, consent records, and token cache.
      */
     KV: KVNamespace;
