@@ -30,7 +30,6 @@ adminRouter.get("/agent/list", async (c) => {
     return c.json({
         status: "ok",
         tokens: tokens.map((t) => ({
-            token: t.token,
             agent_id: t.info.agent_id,
             label: t.info.label,
             created_at: t.info.created_at,
