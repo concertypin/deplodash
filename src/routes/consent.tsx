@@ -131,7 +131,8 @@ export const consentRouter = new Hono<HonoEnv>()
                                   .filter(Boolean)
                     ),
                 ];
-                // Parse the originally requested scopes for audit tracking
+                // Parse the originally requested scopes once and reuse for both
+                // audit tracking and subset validation.
                 const requestedList: string[] | undefined = requested_scopes
                     ? requested_scopes
                           .split(",")
@@ -151,19 +152,15 @@ export const consentRouter = new Hono<HonoEnv>()
                 // Validate that approved scopes are a subset of the originally requested scopes.
                 // This prevents the consent page from being manipulated to grant wider permissions
                 // than what the agent originally requested.
-                if (requested_scopes) {
-                    const originallyRequested = requested_scopes
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean);
+                if (requestedList) {
                     const invalidScopes = scopeList.filter(
-                        (s) => !originallyRequested.includes(s)
+                        (s) => !requestedList.includes(s)
                     );
                     if (invalidScopes.length > 0) {
                         const html = renderPage(
                             <ConsentPage
                                 repo={repo}
-                                scopes={requested_scopes}
+                                scopes={requested_scopes ?? ""}
                                 error={`Cannot approve scopes not in the original request: ${invalidScopes.join(", ")}`}
                             />
                         );
