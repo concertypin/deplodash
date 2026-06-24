@@ -175,14 +175,22 @@ export const consentRouter = new Hono<HonoEnv>()
                           .map((s) => s.trim())
                           .filter(Boolean)
                     : undefined;
-                // Get the authenticated GitHub user for audit trail (non-fatal)
+                // Resolve the authenticated GitHub user for audit trail
                 const ghClient = c.get("client")!;
-                let grantedBy: string | undefined;
+                let grantedBy: string;
                 try {
                     const ghUser = await ghClient.getUser();
                     grantedBy = ghUser.login;
                 } catch {
-                    // GitHub API call failed — consent still works, just without audit trail
+                    // Cannot resolve identity — reject to avoid storing orphaned consent
+                    const html = renderPage(
+                        <ConsentPage
+                            repo={repo}
+                            scopes={rawScopes?.toString() ?? ""}
+                            error="Failed to verify your identity. Please try again."
+                        />
+                    );
+                    return c.html(html, 400);
                 }
 
                 // Validate that approved scopes are a subset of the originally requested scopes.
@@ -270,16 +278,16 @@ export const consentRouter = new Hono<HonoEnv>()
                     .split(",")
                     .map((s) => s.trim())
                     .filter(Boolean);
-                // Get the current user's GitHub login for ownership check
-                let caller: string | undefined;
+                // Resolve the current user's GitHub login for ownership check
+                let caller: string;
                 try {
                     const user = await client.getUser();
                     caller = user.login;
                 } catch {
-                    // GitHub API call failed — proceed without caller check
-                    // (consent will still be deleted, which is fine from a
-                    // security perspective since authGuard ensures the user
-                    // is authenticated)
+                    // Cannot verify identity — fail closed
+                    return c.redirect(
+                        "/?error=Failed+to+verify+identity.+Please+try+again."
+                    );
                 }
                 await tokenService.revokeConsent(
                     agent_id ?? "",

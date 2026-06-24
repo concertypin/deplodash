@@ -670,12 +670,38 @@ describe("GET / (pages)", () => {
 // ─── POST /auth/consent — Record user consent ────────────────────────────────
 
 describe("POST /auth/consent", () => {
+    let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
     beforeEach(async () => {
         const { keys } = await env.KV.list();
         await Promise.all(keys.map((k) => env.KV.delete(k.name)));
+        mockFetch = vi.fn<typeof fetch>();
+        // Default: GitHub API returns a valid user
+        mockFetch.mockResolvedValue(
+            Response.json({
+                login: "testuser",
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
+        );
+        vi.stubGlobal("fetch", mockFetch);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it("records consent and shows success page", async () => {
+        mockFetch.mockResolvedValue(
+            Response.json({
+                login: "testuser",
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
+        );
+
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,
             GITHUB_TOKEN: "ghp_test_user_token",
@@ -722,6 +748,15 @@ describe("POST /auth/consent", () => {
     it("returns 400 and error when recording fails", async () => {
         vi.spyOn(TokenService.prototype, "recordConsent").mockRejectedValue(
             new Error("KV write failed")
+        );
+
+        mockFetch.mockResolvedValue(
+            Response.json({
+                login: "testuser",
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
         );
 
         const authEnv: HonoEnv["Bindings"] = {
@@ -974,9 +1009,25 @@ describe("POST /auth/consent", () => {
 // ─── POST /auth/revoke — Revoke user consent ─────────────────────────────────
 
 describe("POST /auth/revoke", () => {
+    let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
     beforeEach(async () => {
         const { keys } = await env.KV.list();
         await Promise.all(keys.map((k) => env.KV.delete(k.name)));
+        mockFetch = vi.fn<typeof fetch>();
+        mockFetch.mockResolvedValue(
+            Response.json({
+                login: "testuser",
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
+        );
+        vi.stubGlobal("fetch", mockFetch);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it("revokes consent and redirects to /", async () => {
