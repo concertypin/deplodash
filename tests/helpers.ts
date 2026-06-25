@@ -6,7 +6,28 @@
  * (configured via wrangler.jsonc's `kv_namespaces` binding).
  */
 
-import { expect } from "vitest";
+import { assert, expect } from "vitest";
+
+/**
+ * KVNamespace proxy that throws on any property access.
+ *
+ * Use in `it.concurrent` tests to guarantee they never accidentally read
+ * or write KV — a concurrent test touching KV would cause data races with
+ * other concurrent tests sharing the same Worker isolate.
+ *
+ * @example
+ * ```ts
+ * const env: HonoEnv["Bindings"] = { ...BASE_ENV, KV: THROWING_KV };
+ * ```
+ */
+export const THROWING_KV = new Proxy({} as KVNamespace, {
+    get() {
+        throw new Error(
+            "Concurrent test attempted KV access — " +
+                "move this test to a non-concurrent describe block (KV is not isolated per test)."
+        );
+    },
+});
 
 /**
  * Creates a strict mock proxy that makes tests fail (softly) when accessing
@@ -42,4 +63,18 @@ export function strictMock<const Target extends object>(
                 .toBeTruthy();
         },
     });
+}
+
+// Intended, obj might contain any key
+/**
+ * Asserts that the given `body` object contains the specified property `prop`.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any
+export function contains<T extends keyof any>(
+    obj: unknown,
+    prop: T
+): asserts obj is { [K in T]: unknown } {
+    assert(obj);
+    assert(typeof obj === "object");
+    assert(prop in obj);
 }

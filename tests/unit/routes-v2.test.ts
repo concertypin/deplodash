@@ -22,6 +22,7 @@ import { sessionMiddleware } from "@/middleware";
 import { TokenService } from "@/token-service";
 import { env } from "cloudflare:workers";
 import { registerAgentToken } from "@/middleware/agent-auth";
+import { THROWING_KV } from "../helpers";
 
 const errorResponseSchema = z.object({ error: z.string() });
 
@@ -1105,6 +1106,352 @@ describe("POST /auth/revoke", () => {
         );
 
         vi.restoreAllMocks();
+    });
+});
+
+// ─── Concurrent-safe: Consent scope validation (no KV access) ───────────────
+// These tests use THROWING_KV to guarantee they never accidentally read/write
+// KV. They all return 400 before the handler touches KV, so they can safely
+// run in parallel with each other.
+
+describe("Consent scope validation (concurrent-safe)", () => {
+    const CONCURRENT_ENV: HonoEnv["Bindings"] = {
+        ...BASE_ENV,
+        KV: THROWING_KV,
+        GITHUB_TOKEN: "ghp_concurrent_test",
+    };
+
+    it.concurrent(
+        "rejects encrypted scope replayed to a different repo",
+        async () => {
+            const app = new Hono<HonoEnv>()
+                .use("*", sessionMiddleware())
+                .route("/auth", consentRouter);
+
+            // GET consent for repo A → capture encrypted scopes
+            const getResp = await app.fetch(
+                new Request(
+                    "http://localhost/auth/consent?repo=victim%2Frepo&scopes=contents:read&agent_id=agent-A"
+                ),
+                CONCURRENT_ENV
+            );
+            expect(getResp.status).toBe(200);
+            const getText = await getResp.text();
+            const encMatch = getText.match(
+                /name="requested_scopes_enc" value="([^"]+)"/
+            );
+            expect(encMatch).not.toBeNull();
+            const encryptedValue = encMatch![1]!;
+
+            // POST same encrypted scopes to repo B → rejected
+            const postResp = await app.fetch(
+                new Request("http://localhost/auth/consent", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    body: new URLSearchParams({
+                        repo: "attacker/repo", // different repo
+                        scopes: "contents:read",
+                        agent_id: "agent-A",
+                        requested_scopes_enc: encryptedValue,
+                    }),
+                }),
+                CONCURRENT_ENV
+            );
+
+            expect(postResp.status).toBe(400);
+            const text = await postResp.text();
+            expect(text).toContain("Invalid consent request");
+        }
+    );
+
+    it.concurrent(
+        "rejects encrypted scope replayed to a different agent",
+        async () => {
+            const app = new Hono<HonoEnv>()
+                .use("*", sessionMiddleware())
+                .route("/auth", consentRouter);
+
+            // GET consent for agent A → capture encrypted scopes
+            const getResp = await app.fetch(
+                new Request(
+                    "http://localhost/auth/consent?repo=owner%2Frepo&scopes=contents:read&agent_id=agent-A"
+                ),
+                CONCURRENT_ENV
+            );
+            expect(getResp.status).toBe(200);
+            const getText = await getResp.text();
+            const encMatch = getText.match(
+                /name="requested_scopes_enc" value="([^"]+)"/
+            );
+            expect(encMatch).not.toBeNull();
+            const encryptedValue = encMatch![1]!;
+
+            // POST same encrypted scopes but with different agent_id → rejected
+            const postResp = await app.fetch(
+                new Request("http://localhost/auth/consent", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    body: new URLSearchParams({
+                        repo: "owner/repo",
+                        scopes: "contents:read",
+                        agent_id: "agent-B", // different agent
+                        requested_scopes_enc: encryptedValue,
+                    }),
+                }),
+                CONCURRENT_ENV
+            );
+
+            expect(postResp.status).toBe(400);
+            const text = await postResp.text();
+            expect(text).toContain("Invalid consent request");
+        }
+    );
+
+    it.concurrent("rejects empty scopes (no checkbox checked)", async () => {
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        const resp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "owner/repo",
+                    // no "scopes" field at all (no checkboxes checked)
+                    requested_scopes: "contents:read",
+                    agent_id: "test-agent",
+                }),
+            }),
+            CONCURRENT_ENV
+        );
+
+        expect(resp.status).toBe(400);
+        const text = await resp.text();
+        expect(text).toContain("You must select at least one permission");
+    });
+});
+
+// ─── Sequential: Cross-agent isolation (KV required) ────────────────────────
+
+describe("Cross-agent consent isolation", () => {
+    let pkcs8Pem: string;
+    let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
+    function jsonResponse(data: unknown, status = 200): Response {
+        return new Response(JSON.stringify(data), {
+            status,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
+
+    function makeEnv(pem: string): HonoEnv["Bindings"] {
+        return {
+            ...BASE_ENV,
+            GITHUB_APP_PRIVATE_KEY: pem,
+            KV: env.KV,
+        };
+    }
+
+    beforeAll(async () => {
+        const keyPair = await crypto.subtle.generateKey(
+            {
+                name: "RSASSA-PKCS1-v1_5",
+                modulusLength: 2048,
+                publicExponent: new Uint8Array([1, 0, 1]),
+                hash: "SHA-256",
+            },
+            true,
+            ["sign", "verify"]
+        );
+        const pkcs8 = await crypto.subtle.exportKey(
+            "pkcs8",
+            keyPair.privateKey
+        );
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(pkcs8)));
+        const lines = b64.match(/.{1,64}/g)?.join("\n") ?? b64;
+        pkcs8Pem = `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
+    });
+
+    beforeEach(async () => {
+        const { keys } = await env.KV.list();
+        await Promise.all(keys.map((k) => env.KV.delete(k.name)));
+
+        mockFetch = vi.fn<typeof fetch>();
+        vi.stubGlobal("fetch", mockFetch);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("Agent A's consent does not authorize Agent B", async () => {
+        // Register two agents
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-a-token",
+            "agent-a",
+            "Agent A"
+        );
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-b-token",
+            "agent-b",
+            "Agent B"
+        );
+
+        // Record consent for Agent A only
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("agent-a", "shared/repo", [
+            "contents:read",
+        ]);
+
+        // Agent B requests the same repo+scopes → must NOT piggyback
+        const app = new Hono<HonoEnv>().route("/api", tokenRouter);
+        const client = testClient(app, makeEnv(pkcs8Pem));
+
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "shared/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer agent-b-token" } }
+        );
+
+        expect(resp.status).toBe(202);
+        const body = (await resp.json()) as Record<string, unknown>;
+        expect(body.status).toBe("needs_consent");
+        // No GitHub API calls should be made — consent check happens first
+        expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("Agent A's token request succeeds with own consent", async () => {
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-a-token-2",
+            "agent-a",
+            "Agent A"
+        );
+
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("agent-a", "owner/repo", [
+            "contents:read",
+        ]);
+
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 999, account: { login: "owner" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(jsonResponse({ name: "repo" }))
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "ghs_agent_a_token",
+                    expires_at: "2027-06-01T00:00:00Z",
+                    permissions: { contents: "read" },
+                    repository_selection: "selected",
+                })
+            );
+
+        const app = new Hono<HonoEnv>().route("/api", tokenRouter);
+        const client = testClient(app, makeEnv(pkcs8Pem));
+
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "owner/repo", scopes: ["contents:read"] },
+            },
+            { headers: { Authorization: "Bearer agent-a-token-2" } }
+        );
+
+        expect(resp.status).toBe(200);
+        const body = (await resp.json()) as Record<string, unknown>;
+        expect(body.status).toBe("ok");
+        expect(body.token).toBe("ghs_agent_a_token");
+    });
+});
+
+// ─── Sequential: Encrypted field omission bypass (KV write) ─────────────────
+// This test documents a known gap: when the encrypted field is removed from the
+// POST body but the plaintext requested_scopes is present, the handler does NOT
+// validate repo/agent_id binding against the original request. The consent is
+// stored with whatever repo/agent_id the POST body contains.
+
+describe("Encrypted consent field omission (KV required)", () => {
+    let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
+    beforeEach(async () => {
+        const { keys } = await env.KV.list();
+        await Promise.all(keys.map((k) => env.KV.delete(k.name)));
+
+        mockFetch = vi.fn<typeof fetch>();
+        mockFetch.mockResolvedValue(
+            Response.json({
+                login: "testuser",
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
+        );
+        vi.stubGlobal("fetch", mockFetch);
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("omitting encrypted field allows repo/agent_id injection", async () => {
+        // Submit POST without requested_scopes_enc, with tampered repo and agent_id.
+        // The handler's encrypted validation is skipped, plaintext scopes pass
+        // subset validation, and the consent is recorded with the tampered values.
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/auth", consentRouter);
+
+        const resp = await app.fetch(
+            new Request("http://localhost/auth/consent", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    repo: "injected/repo", // tampered — not the original repo
+                    scopes: "contents:read",
+                    requested_scopes: "contents:read", // plaintext present
+                    agent_id: "injected-agent", // tampered
+                }),
+            }),
+            authEnv
+        );
+
+        // Currently: accepted (consent recorded for injected values)
+        expect(resp.status).toBe(200);
+        const text = await resp.text();
+        expect(text).toContain("Consent");
+
+        // Verify consent was stored with the INJECTED values (not the original request)
+        const tokenService = new TokenService(env.KV);
+        const hasConsent = await tokenService.checkConsent(
+            "injected-agent",
+            "injected/repo",
+            ["contents:read"]
+        );
+        expect(hasConsent).toBe(true);
     });
 });
 
