@@ -15,8 +15,8 @@ import { validator, describeRoute, resolver } from "hono-openapi";
 import * as z from "zod";
 import type { HonoEnv } from "@/types";
 import { agentAuthMiddleware } from "@/middleware/agent-auth";
-import { TokenService } from "@/token-service";
-import { GitHubApp } from "@/github-app";
+import { TokenService } from "@/token/service";
+import { GitHubApp } from "@/github/app";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 

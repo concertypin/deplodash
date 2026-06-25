@@ -1,3 +1,6 @@
+// Re-export hashScopes for backward compatibility (tests import from @/helpers).
+export { hashScopes } from "@/github/scopes";
+
 // ─── Pure Helpers ────────────────────────────────────────────────────────────
 
 export function escapeHtml(s: string): string {
@@ -21,17 +24,4 @@ export function isSafeRedirect(url: string): boolean {
     );
 }
 
-/**
- * Hash a scope array for use as a KV key.
- * Returns a 16-char base64url-encoded SHA-256 digest of the sorted, joined scopes.
- */
-export async function hashScopes(scopes: string[]): Promise<string> {
-    const sorted = [...scopes].sort().join(",");
-    const utf8 = new TextEncoder().encode(sorted);
-    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", utf8));
-    return btoa(String.fromCharCode(...hash))
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "")
-        .slice(0, 16);
-}
+

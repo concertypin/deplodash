@@ -15,9 +15,10 @@
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
-import { COMPOUND_SCOPES, SCOPE_LABELS, type HonoEnv } from "@/types";
+import { COMPOUND_SCOPES, SCOPE_LABELS } from "@/github/scopes";
+import type { HonoEnv } from "@/types";
 import { authGuard } from "@/middleware";
-import { TokenService } from "@/token-service";
+import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 import { encryptWith, decryptWith, getOrInitKey } from "@/crypto";
 import { renderPage, ConsentPage } from "@/views";

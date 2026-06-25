@@ -7,7 +7,7 @@
 
 import type { FC } from "hono/jsx";
 import { Layout } from "./Layout";
-import { SCOPE_CATEGORIES, SCOPE_LABELS } from "@/types";
+import { SCOPE_CATEGORIES, SCOPE_LABELS } from "@/github/scopes";
 
 interface ConsentPageProps {
     repo: string;
