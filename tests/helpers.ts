@@ -9,6 +9,62 @@
 import { assert, expect, vi } from "vitest";
 import type { HonoEnv } from "@/types";
 
+// ─── In-memory KV mock ─────────────────────────────────────────────────────
+
+/**
+ * Lightweight in-memory `KVNamespace` implementation for fast unit tests.
+ * Replaces `import { env } from "cloudflare:workers"` → `env.KV`,
+ * avoiding per-file Worker isolate overhead.
+ */
+export class FakeKV {
+    private store = new Map<string, string>();
+
+    async get(key: string): Promise<string | null>;
+    async get(key: string, type: "text"): Promise<string | null>;
+    async get<ExpectedValue = unknown>(key: string, type: "json"): Promise<ExpectedValue | null>;
+    get(key: string, _type?: "text" | "json"): Promise<string | null> {
+        const value = this.store.get(key) ?? null;
+        if (_type === "json") return Promise.resolve(value ? JSON.parse(value) : null);
+        return Promise.resolve(value ?? null);
+    }
+
+    put(
+        key: string,
+        value: string | ArrayBuffer | ArrayBufferView | ReadableStream,
+        _options?: KVNamespacePutOptions
+    ): Promise<void> {
+        this.store.set(key, typeof value === "string" ? value : "[binary]");
+        return Promise.resolve();
+    }
+
+    delete(key: string): Promise<void> {
+        this.store.delete(key);
+        return Promise.resolve();
+    }
+
+    getWithMetadata(key: string): Promise<{ value: string | null; metadata: null; cacheStatus: null }> {
+        const value = this.store.get(key) ?? null;
+        return Promise.resolve({ value, metadata: null, cacheStatus: null });
+    }
+
+    list(options?: KVNamespaceListOptions): Promise<{ keys: Array<{ name: string }>; list_complete: true; cacheStatus: null }> {
+        const prefix = options?.prefix ?? "";
+        const keys: Array<{ name: string }> = [];
+        for (const name of this.store.keys()) {
+            if (name.startsWith(prefix)) {
+                keys.push({ name });
+            }
+        }
+        keys.sort((a, b) => a.name.localeCompare(b.name));
+        return Promise.resolve({ keys, list_complete: true, cacheStatus: null });
+    }
+
+    /** Clear all keys — useful in beforeEach for isolation. */
+    clear(): void {
+        this.store.clear();
+    }
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Common test encryption secret (16+ chars for AES-256). */

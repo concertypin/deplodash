@@ -1,17 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { env } from "cloudflare:workers";
+import { FakeKV } from "../../helpers";
 import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 
 describe("TokenService — revoke", () => {
-    let kv: KVNamespace;
+    let kv: FakeKV;
     let service: TokenService;
 
-    beforeEach(async () => {
-        kv = env.KV;
-        const { keys } = await kv.list();
-        await Promise.all(keys.map((k) => kv.delete(k.name)));
-        service = new TokenService(kv);
+    beforeEach(() => {
+        kv = new FakeKV();
+        service = new TokenService(kv as unknown as KVNamespace);
     });
 
     describe("revokeAllConsentsForRepo", () => {

@@ -44,7 +44,6 @@ const testConfig: Config["test"] = {
     globals: true,
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
 
-    setupFiles: "./tests/setup.ts",
     silent: "passed-only",
     env: {
         VITEST: "true",
