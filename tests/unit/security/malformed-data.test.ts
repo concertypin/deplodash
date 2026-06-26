@@ -14,30 +14,62 @@ describe("Malformed Data Attack Surface", () => {
 
     it("getAllApprovedScopes ignores malformed consent records", async () => {
         await service.recordConsent("agent-a", "repo/valid", ["contents:read"]);
-        await env.KV.put("consent:agent-a:repo/valid:badhash1", JSON.stringify({ repo: "repo/valid", granted_at: "2026-01-01T00:00:00Z" }));
-        await env.KV.put("consent:agent-a:repo/valid:badhash2", JSON.stringify({ foo: "bar" }));
+        await env.KV.put(
+            "consent:agent-a:repo/valid:badhash1",
+            JSON.stringify({
+                repo: "repo/valid",
+                granted_at: "2026-01-01T00:00:00Z",
+            })
+        );
+        await env.KV.put(
+            "consent:agent-a:repo/valid:badhash2",
+            JSON.stringify({ foo: "bar" })
+        );
 
-        const scopes = await service.getAllApprovedScopes("agent-a", "repo/valid");
+        const scopes = await service.getAllApprovedScopes(
+            "agent-a",
+            "repo/valid"
+        );
         expect(scopes).toEqual(["contents:read"]);
     });
 
     it("checkConsent returns false when consent record is malformed", async () => {
         const hash = await hashScopes(["contents:read"]);
         const key = `consent:agent-a:repo/malformed:${hash}`;
-        await env.KV.put(key, JSON.stringify({ granted_at: "2026-01-01T00:00:00Z" }));
+        await env.KV.put(
+            key,
+            JSON.stringify({ granted_at: "2026-01-01T00:00:00Z" })
+        );
 
-        const result = await service.checkConsent("agent-a", "repo/malformed", ["contents:read"]);
+        const result = await service.checkConsent("agent-a", "repo/malformed", [
+            "contents:read",
+        ]);
         expect(result).toBe(false);
     });
 
     it("malformed consent record is cleaned up when encountered through requestToken", async () => {
         const hash = await hashScopes(["contents:read"]);
         const key = `consent:agent-a:repo/cleanup:${hash}`;
-        await env.KV.put(key, JSON.stringify({ granted_at: "2026-01-01T00:00:00Z", repo: "repo/cleanup" }));
+        await env.KV.put(
+            key,
+            JSON.stringify({
+                granted_at: "2026-01-01T00:00:00Z",
+                repo: "repo/cleanup",
+            })
+        );
 
         const result = await service.requestToken(
-            { repo: "repo/cleanup", scopes: ["contents:read"], baseUrl: "http://test", agentId: "agent-a" },
-            () => Promise.resolve({ token: "ghs_test", expires_at: new Date(Date.now() + 3600000).toISOString() })
+            {
+                repo: "repo/cleanup",
+                scopes: ["contents:read"],
+                baseUrl: "http://test",
+                agentId: "agent-a",
+            },
+            () =>
+                Promise.resolve({
+                    token: "ghs_test",
+                    expires_at: new Date(Date.now() + 3600000).toISOString(),
+                })
         );
         expect(result.status).toBe("needs_consent");
 

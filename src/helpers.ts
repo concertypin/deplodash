@@ -23,5 +23,3 @@ export function isSafeRedirect(url: string): boolean {
         (url.length === 1 || (url[1] !== "/" && url[1] !== "\\"))
     );
 }
-
-

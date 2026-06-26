@@ -17,7 +17,9 @@ describe("TokenService — listConsents", () => {
     });
 
     it("returns a single consent record", async () => {
-        await service.recordConsent("test-agent", "alpha/repo", ["contents:read"]);
+        await service.recordConsent("test-agent", "alpha/repo", [
+            "contents:read",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.repo).toBe("alpha/repo");
@@ -26,29 +28,43 @@ describe("TokenService — listConsents", () => {
     });
 
     it("includes granted_by in listConsents when set", async () => {
-        await service.recordConsent("test-agent", "alpha/repo", ["contents:read"], undefined, "testuser");
+        await service.recordConsent(
+            "test-agent",
+            "alpha/repo",
+            ["contents:read"],
+            undefined,
+            "testuser"
+        );
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.granted_by).toBe("testuser");
     });
 
     it("omits granted_by in listConsents when not set", async () => {
-        await service.recordConsent("test-agent", "alpha/repo", ["contents:read"]);
+        await service.recordConsent("test-agent", "alpha/repo", [
+            "contents:read",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.granted_by).toBeUndefined();
     });
 
     it("includes agent_id in listConsents when set", async () => {
-        await service.recordConsent("test-agent", "alpha/repo", ["contents:read"]);
+        await service.recordConsent("test-agent", "alpha/repo", [
+            "contents:read",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.agent_id).toBe("test-agent");
     });
 
     it("returns multiple consent records", async () => {
-        await service.recordConsent("test-agent", "alpha/repo", ["contents:read"]);
-        await service.recordConsent("test-agent", "beta/repo", ["contents:write"]);
+        await service.recordConsent("test-agent", "alpha/repo", [
+            "contents:read",
+        ]);
+        await service.recordConsent("test-agent", "beta/repo", [
+            "contents:write",
+        ]);
         await service.recordConsent("test-agent", "gamma/repo", ["admin"]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(3);
@@ -57,9 +73,13 @@ describe("TokenService — listConsents", () => {
     });
 
     it("sorts results by granted_at descending (newest first)", async () => {
-        await service.recordConsent("test-agent", "old/repo", ["contents:read"]);
+        await service.recordConsent("test-agent", "old/repo", [
+            "contents:read",
+        ]);
         await new Promise((r) => setTimeout(r, 50));
-        await service.recordConsent("test-agent", "new/repo", ["contents:write"]);
+        await service.recordConsent("test-agent", "new/repo", [
+            "contents:write",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(2);
         expect(consents[0]!.repo).toBe("new/repo");
@@ -67,16 +87,26 @@ describe("TokenService — listConsents", () => {
     });
 
     it("handles old-format consent records without repo/scopes fields", async () => {
-        await kv.put("consent:legacy/repo:abc123", JSON.stringify({ granted_at: "2026-01-01T00:00:00Z" }));
-        await service.recordConsent("test-agent", "new/repo", ["contents:read"]);
+        await kv.put(
+            "consent:legacy/repo:abc123",
+            JSON.stringify({ granted_at: "2026-01-01T00:00:00Z" })
+        );
+        await service.recordConsent("test-agent", "new/repo", [
+            "contents:read",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.repo).toBe("new/repo");
     });
 
     it("skips consent records with missing required fields", async () => {
-        await kv.put("consent:orphan:hash1", JSON.stringify({ some_other_field: true }));
-        await service.recordConsent("test-agent", "valid/repo", ["contents:read"]);
+        await kv.put(
+            "consent:orphan:hash1",
+            JSON.stringify({ some_other_field: true })
+        );
+        await service.recordConsent("test-agent", "valid/repo", [
+            "contents:read",
+        ]);
         const consents = await service.listConsents();
         expect(consents).toHaveLength(1);
         expect(consents[0]!.repo).toBe("valid/repo");
@@ -84,8 +114,20 @@ describe("TokenService — listConsents", () => {
 
     describe("with grantedBy filter", () => {
         it("returns only consents granted by the specified user", async () => {
-            await service.recordConsent("agent-a", "alpha/repo", ["contents:read"], undefined, "userA");
-            await service.recordConsent("agent-b", "beta/repo", ["contents:write"], undefined, "userB");
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+            await service.recordConsent(
+                "agent-b",
+                "beta/repo",
+                ["contents:write"],
+                undefined,
+                "userB"
+            );
             const userAConsents = await service.listConsents("userA");
             expect(userAConsents).toHaveLength(1);
             expect(userAConsents[0]!.repo).toBe("alpha/repo");
@@ -95,23 +137,51 @@ describe("TokenService — listConsents", () => {
         });
 
         it("returns empty array when specified user has no consents", async () => {
-            await service.recordConsent("agent-a", "alpha/repo", ["contents:read"], undefined, "userA");
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
             const consents = await service.listConsents("nobody");
             expect(consents).toEqual([]);
         });
 
         it("excludes records without granted_by when filter is active", async () => {
-            await service.recordConsent("agent-a", "legacy/repo", ["contents:read"]);
-            await service.recordConsent("agent-b", "owned/repo", ["contents:write"], undefined, "userA");
+            await service.recordConsent("agent-a", "legacy/repo", [
+                "contents:read",
+            ]);
+            await service.recordConsent(
+                "agent-b",
+                "owned/repo",
+                ["contents:write"],
+                undefined,
+                "userA"
+            );
             const consents = await service.listConsents("userA");
             expect(consents).toHaveLength(1);
             expect(consents[0]!.repo).toBe("owned/repo");
         });
 
         it("returns all records when filter is not provided (backward compat)", async () => {
-            await service.recordConsent("agent-a", "alpha/repo", ["contents:read"], undefined, "userA");
-            await service.recordConsent("agent-b", "beta/repo", ["contents:write"], undefined, "userB");
-            await service.recordConsent("agent-c", "legacy/repo", ["contents:read"]);
+            await service.recordConsent(
+                "agent-a",
+                "alpha/repo",
+                ["contents:read"],
+                undefined,
+                "userA"
+            );
+            await service.recordConsent(
+                "agent-b",
+                "beta/repo",
+                ["contents:write"],
+                undefined,
+                "userB"
+            );
+            await service.recordConsent("agent-c", "legacy/repo", [
+                "contents:read",
+            ]);
             const all = await service.listConsents();
             expect(all).toHaveLength(3);
         });

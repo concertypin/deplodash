@@ -14,18 +14,25 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
     GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 
 describe("GET /auth/consent", () => {
-    const app = new Hono<HonoEnv>().route("/auth", authRouter).route("/auth", consentRouter);
+    const app = new Hono<HonoEnv>()
+        .route("/auth", authRouter)
+        .route("/auth", consentRouter);
     const client = testClient(app, BASE_ENV);
 
-    beforeEach(() => { resetKeyCache(); });
+    beforeEach(() => {
+        resetKeyCache();
+    });
 
     it("redirects to login when not authenticated", async () => {
-        const resp = await client.auth.consent.$get({ query: { repo: "owner/repo", scopes: "contents:read" } });
+        const resp = await client.auth.consent.$get({
+            query: { repo: "owner/repo", scopes: "contents:read" },
+        });
         expect(resp.status).toBe(200);
         const text = await resp.text();
         expect(text).toContain("/auth/github");
@@ -46,7 +53,9 @@ describe("GET /auth/github", () => {
     });
 
     it("includes next parameter when provided", async () => {
-        const resp = await client.auth.github.$get({ query: { next: "/custom" } });
+        const resp = await client.auth.github.$get({
+            query: { next: "/custom" },
+        });
         expect(resp.status).toBe(302);
         const location = resp.headers.get("Location");
         expect(location).toContain("https://github.com/login/oauth/authorize");

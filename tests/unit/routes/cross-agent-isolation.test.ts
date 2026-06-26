@@ -1,4 +1,13 @@
-import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import {
+    describe,
+    expect,
+    it,
+    vi,
+    beforeAll,
+    beforeEach,
+    afterEach,
+} from "vitest";
+import { jsonResponse } from "../../helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -14,12 +23,9 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
     GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
 };
-
-function jsonResponse(data: unknown, status = 200): Response {
-    return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-}
 
 describe("Cross-agent consent isolation", () => {
     let pkcs8Pem: string;
@@ -27,10 +33,19 @@ describe("Cross-agent consent isolation", () => {
 
     beforeAll(async () => {
         const keyPair = await crypto.subtle.generateKey(
-            { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
-            true, ["sign", "verify"]
+            {
+                name: "RSASSA-PKCS1-v1_5",
+                modulusLength: 2048,
+                publicExponent: new Uint8Array([1, 0, 1]),
+                hash: "SHA-256",
+            },
+            true,
+            ["sign", "verify"]
         );
-        const pkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+        const pkcs8 = await crypto.subtle.exportKey(
+            "pkcs8",
+            keyPair.privateKey
+        );
         const b64 = btoa(String.fromCharCode(...new Uint8Array(pkcs8)));
         const lines = b64.match(/.{1,64}/g)?.join("\n") ?? b64;
         pkcs8Pem = `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
@@ -43,16 +58,34 @@ describe("Cross-agent consent isolation", () => {
         vi.stubGlobal("fetch", mockFetch);
     });
 
-    afterEach(() => { vi.unstubAllGlobals(); });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
 
     it("Agent A's consent does not authorize Agent B", async () => {
-        await registerAgentToken(BASE_ENV.KV, "agent-a-token", "agent-a", "Agent A");
-        await registerAgentToken(BASE_ENV.KV, "agent-b-token", "agent-b", "Agent B");
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-a-token",
+            "agent-a",
+            "Agent A"
+        );
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-b-token",
+            "agent-b",
+            "Agent B"
+        );
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("agent-a", "shared/repo", ["contents:read"]);
+        await tokenService.recordConsent("agent-a", "shared/repo", [
+            "contents:read",
+        ]);
 
         const app = new Hono<HonoEnv>().route("/api", tokenRouter);
-        const client = testClient(app, { ...BASE_ENV, GITHUB_APP_PRIVATE_KEY: pkcs8Pem, KV: env.KV });
+        const client = testClient(app, {
+            ...BASE_ENV,
+            GITHUB_APP_PRIVATE_KEY: pkcs8Pem,
+            KV: env.KV,
+        });
         const resp = await client.api.token.$post(
             { json: { repo: "shared/repo", scopes: ["contents:read"] } },
             { headers: { Authorization: "Bearer agent-b-token" } }
@@ -64,18 +97,45 @@ describe("Cross-agent consent isolation", () => {
     });
 
     it("Agent A's token request succeeds with own consent", async () => {
-        await registerAgentToken(BASE_ENV.KV, "agent-a-token-2", "agent-a", "Agent A");
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "agent-a-token-2",
+            "agent-a",
+            "Agent A"
+        );
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("agent-a", "owner/repo", ["contents:read"]);
+        await tokenService.recordConsent("agent-a", "owner/repo", [
+            "contents:read",
+        ]);
 
         mockFetch
-            .mockResolvedValueOnce(jsonResponse({ id: 999, account: { login: "owner" } }))
-            .mockResolvedValueOnce(jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" }))
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 999, account: { login: "owner" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
             .mockResolvedValueOnce(jsonResponse({ name: "repo" }))
-            .mockResolvedValueOnce(jsonResponse({ token: "ghs_agent_a_token", expires_at: "2027-06-01T00:00:00Z", permissions: { contents: "read" }, repository_selection: "selected" }));
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "ghs_agent_a_token",
+                    expires_at: "2027-06-01T00:00:00Z",
+                    permissions: { contents: "read" },
+                    repository_selection: "selected",
+                })
+            );
 
         const app = new Hono<HonoEnv>().route("/api", tokenRouter);
-        const client = testClient(app, { ...BASE_ENV, GITHUB_APP_PRIVATE_KEY: pkcs8Pem, KV: env.KV });
+        const client = testClient(app, {
+            ...BASE_ENV,
+            GITHUB_APP_PRIVATE_KEY: pkcs8Pem,
+            KV: env.KV,
+        });
         const resp = await client.api.token.$post(
             { json: { repo: "owner/repo", scopes: ["contents:read"] } },
             { headers: { Authorization: "Bearer agent-a-token-2" } }

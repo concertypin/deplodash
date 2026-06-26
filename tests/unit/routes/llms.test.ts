@@ -11,7 +11,8 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: undefined as unknown as KVNamespace,
     GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 

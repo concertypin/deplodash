@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { jsonResponse } from "../../helpers";
 import { GitHubApp } from "@/github/app";
 
 // ─── RSA Key Setup ───────────────────────────────────────────────────────────
@@ -22,13 +23,6 @@ beforeAll(async () => {
     const lines = b64.match(/.{1,64}/g)?.join("\n") ?? b64;
     pkcs8Pem = `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----`;
 });
-
-function jsonResponse(data: unknown, status = 200): Response {
-    return new Response(JSON.stringify(data), {
-        status,
-        headers: { "Content-Type": "application/json" },
-    });
-}
 
 describe("GitHubApp", () => {
     let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
@@ -57,8 +51,12 @@ describe("GitHubApp", () => {
 
         it("falls back from org 404 to user installation", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ id: 99, account: { login: "myuser" } }));
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 99, account: { login: "myuser" } })
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             const result = await app.resolveInstallationId("myuser");
             expect(result).toBe("99");
@@ -66,7 +64,9 @@ describe("GitHubApp", () => {
         });
 
         it("uses in-memory cache for repeated calls to the same owner", async () => {
-            mockFetch.mockResolvedValue(jsonResponse({ id: 7, account: { login: "cached-org" } }));
+            mockFetch.mockResolvedValue(
+                jsonResponse({ id: 7, account: { login: "cached-org" } })
+            );
             const app = new GitHubApp("123456", pkcs8Pem);
             const first = await app.resolveInstallationId("cached-org");
             const second = await app.resolveInstallationId("cached-org");
@@ -76,7 +76,9 @@ describe("GitHubApp", () => {
         });
 
         it("throws on unexpected org endpoint status (non-404) without leaking body", async () => {
-            mockFetch.mockResolvedValue(jsonResponse({ message: "Server error" }, 500));
+            mockFetch.mockResolvedValue(
+                jsonResponse({ message: "Server error" }, 500)
+            );
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {
@@ -85,14 +87,20 @@ describe("GitHubApp", () => {
                 thrown = e as Error;
             }
             expect(thrown).toBeDefined();
-            expect(thrown!.message).toMatch(/failed to check org installation/i);
+            expect(thrown!.message).toMatch(
+                /failed to check org installation/i
+            );
             expect(thrown!.message).not.toContain("Server error");
         });
 
         it("throws on unexpected user endpoint status after org 404 without leaking body", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ message: "Server error" }, 500));
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Server error" }, 500)
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {
@@ -101,22 +109,34 @@ describe("GitHubApp", () => {
                 thrown = e as Error;
             }
             expect(thrown).toBeDefined();
-            expect(thrown!.message).toMatch(/failed to check user installation/i);
+            expect(thrown!.message).toMatch(
+                /failed to check user installation/i
+            );
             expect(thrown!.message).not.toContain("Server error");
         });
 
         it("throws when both org and user return 404 (not installed)", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404));
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(app.resolveInstallationId("uninstalled-org")).rejects.toThrow(/not installed/i);
+            await expect(
+                app.resolveInstallationId("uninstalled-org")
+            ).rejects.toThrow(/not installed/i);
         });
 
         it("caches per-owner independently", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 10, account: { login: "org-a" } }))
-                .mockResolvedValueOnce(jsonResponse({ id: 20, account: { login: "org-b" } }));
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 10, account: { login: "org-a" } })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 20, account: { login: "org-b" } })
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             const a = await app.resolveInstallationId("org-a");
             const b = await app.resolveInstallationId("org-b");
@@ -140,21 +160,30 @@ describe("GitHubApp", () => {
                 })
             );
             const app = new GitHubApp("123456", pkcs8Pem);
-            const result = await app.getInstallationToken({ contents: "read" }, "42");
+            const result = await app.getInstallationToken(
+                { contents: "read" },
+                "42"
+            );
             expect(result.token).toBe("ghs_token123");
             expect(result.expires_at).toBe("2026-12-31T23:59:59Z");
             expect(result.permissions).toEqual({ contents: "read" });
             expect(result.repositorySelection).toBe("selected");
-            expect(mockFetch.mock.calls[0]![0] as string).toContain("/app/installations/42/access_tokens");
+            expect(mockFetch.mock.calls[0]![0] as string).toContain(
+                "/app/installations/42/access_tokens"
+            );
         });
 
         it("throws when no installationId is provided", async () => {
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(app.getInstallationToken({ contents: "read" }, undefined)).rejects.toThrow(/no installation id/i);
+            await expect(
+                app.getInstallationToken({ contents: "read" }, undefined)
+            ).rejects.toThrow(/no installation id/i);
         });
 
         it("throws on GitHub API error response without leaking body", async () => {
-            mockFetch.mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401));
+            mockFetch.mockResolvedValue(
+                jsonResponse({ message: "Bad credentials" }, 401)
+            );
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {
@@ -171,7 +200,9 @@ describe("GitHubApp", () => {
     describe("requestToken", () => {
         it("resolves installation and returns a token", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 55, account: { login: "test-owner" } }))
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 55, account: { login: "test-owner" } })
+                )
                 .mockResolvedValueOnce(
                     jsonResponse({
                         token: "ghs_final_token",
@@ -181,26 +212,42 @@ describe("GitHubApp", () => {
                     })
                 );
             const app = new GitHubApp("123456", pkcs8Pem);
-            const result = await app.requestToken(["contents:read"], "test-owner");
+            const result = await app.requestToken(
+                ["contents:read"],
+                "test-owner"
+            );
             expect(result.token).toBe("ghs_final_token");
             expect(mockFetch).toHaveBeenCalledTimes(2);
         });
 
         it("throws when resolveInstallationId fails", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404));
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
-            await expect(app.requestToken(["contents:read"], "no-install")).rejects.toThrow(/not installed/i);
+            await expect(
+                app.requestToken(["contents:read"], "no-install")
+            ).rejects.toThrow(/not installed/i);
         });
     });
 
     describe("ensureRepoExists", () => {
         it("returns true when repo already exists", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 10, account: { login: "myorg" } }))
                 .mockResolvedValueOnce(
-                    jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" })
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
                 )
                 .mockResolvedValueOnce(jsonResponse({ name: "existing-repo" }));
             const app = new GitHubApp("123456", pkcs8Pem);
@@ -211,43 +258,86 @@ describe("GitHubApp", () => {
 
         it("creates a new repo for an org owner", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 10, account: { login: "myorg" } }))
                 .mockResolvedValueOnce(
-                    jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" })
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
                 )
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
                 .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
-                .mockResolvedValueOnce(jsonResponse({ name: "new-repo", full_name: "myorg/new-repo" }, 201));
+                .mockResolvedValueOnce(
+                    jsonResponse(
+                        { name: "new-repo", full_name: "myorg/new-repo" },
+                        201
+                    )
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             const result = await app.ensureRepoExists("myorg", "new-repo");
             expect(result).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(5);
-            expect(mockFetch.mock.calls[4]![0] as string).toContain("/orgs/myorg/repos");
+            expect(mockFetch.mock.calls[4]![0] as string).toContain(
+                "/orgs/myorg/repos"
+            );
         });
 
         it("creates a new repo for a user owner", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 20, account: { login: "myuser" } }))
                 .mockResolvedValueOnce(
-                    jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" })
+                    jsonResponse({ id: 20, account: { login: "myuser" } })
                 )
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
-                .mockResolvedValueOnce(jsonResponse({ name: "user-repo", full_name: "myuser/user-repo" }, 201));
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse(
+                        { name: "user-repo", full_name: "myuser/user-repo" },
+                        201
+                    )
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             const result = await app.ensureRepoExists("myuser", "user-repo");
             expect(result).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(5);
-            expect(mockFetch.mock.calls[4]![0] as string).toContain("/user/repos");
+            expect(mockFetch.mock.calls[4]![0] as string).toContain(
+                "/user/repos"
+            );
         });
 
         it("throws on repo check error (non-404) without leaking body", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 10, account: { login: "myorg" } }))
                 .mockResolvedValueOnce(
-                    jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" })
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
                 )
-                .mockResolvedValueOnce(jsonResponse({ message: "Server error" }, 500));
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Server error" }, 500)
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {
@@ -262,13 +352,27 @@ describe("GitHubApp", () => {
 
         it("throws on repo creation failure without leaking body", async () => {
             mockFetch
-                .mockResolvedValueOnce(jsonResponse({ id: 10, account: { login: "myorg" } }))
                 .mockResolvedValueOnce(
-                    jsonResponse({ token: "admin_token", expires_at: "2026-12-31T23:59:59Z", permissions: { administration: "write" }, repository_selection: "selected" })
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
                 )
-                .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
                 .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
-                .mockResolvedValueOnce(jsonResponse({ message: "Validation failed", errors: [] }, 422));
+                .mockResolvedValueOnce(
+                    jsonResponse(
+                        { message: "Validation failed", errors: [] },
+                        422
+                    )
+                );
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {

@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
+import { TEST_SECRET } from "../helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -8,7 +9,6 @@ import { env } from "cloudflare:workers";
 import { resetKeyCache, getOrInitKey, encryptWith } from "@/crypto";
 import { sessionMiddleware } from "@/middleware";
 
-const TEST_SECRET = "test-secret-1234567890123456";
 const BASE_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",

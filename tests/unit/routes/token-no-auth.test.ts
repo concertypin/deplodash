@@ -16,18 +16,23 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
     GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 
-beforeEach(() => { resetKeyCache(); });
+beforeEach(() => {
+    resetKeyCache();
+});
 
 describe("POST /api/token (without auth)", () => {
     const app = new Hono<HonoEnv>().route("/api", tokenRouter);
     const client = testClient(app, BASE_ENV);
 
     it("returns 401 when no bearer token", async () => {
-        const resp = await client.api.token.$post({ json: { repo: "owner/repo", scopes: ["contents:read"] } });
+        const resp = await client.api.token.$post({
+            json: { repo: "owner/repo", scopes: ["contents:read"] },
+        });
         expect(resp.status).toBe(401);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toBeTruthy();

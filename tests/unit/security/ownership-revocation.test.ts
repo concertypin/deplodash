@@ -13,24 +13,82 @@ describe("Consent Ownership — Cross-User Revocation Prevention", () => {
     });
 
     it("revokeConsent throws ConsentOwnershipError when caller does not match granted_by with mixed-case login", async () => {
-        await service.recordConsent("agent-a", "repo/alpha", ["contents:read"], undefined, "UserA");
-        await expect(service.revokeConsent("agent-a", "repo/alpha", ["contents:read"], "userA")).rejects.toThrow(ConsentOwnershipError);
+        await service.recordConsent(
+            "agent-a",
+            "repo/alpha",
+            ["contents:read"],
+            undefined,
+            "UserA"
+        );
+        await expect(
+            service.revokeConsent(
+                "agent-a",
+                "repo/alpha",
+                ["contents:read"],
+                "userA"
+            )
+        ).rejects.toThrow(ConsentOwnershipError);
     });
 
     it("revokeConsent succeeds for the exact matching user", async () => {
-        await service.recordConsent("agent-a", "repo/alpha", ["contents:read"], undefined, "UserA");
-        await expect(service.revokeConsent("agent-a", "repo/alpha", ["contents:read"], "UserA")).resolves.toBeUndefined();
+        await service.recordConsent(
+            "agent-a",
+            "repo/alpha",
+            ["contents:read"],
+            undefined,
+            "UserA"
+        );
+        await expect(
+            service.revokeConsent(
+                "agent-a",
+                "repo/alpha",
+                ["contents:read"],
+                "UserA"
+            )
+        ).resolves.toBeUndefined();
     });
 
     it("revokeConsent with caller succeeds on records without granted_by (old format)", async () => {
-        await service.recordConsent("agent-a", "legacy/repo", ["contents:read"]);
-        await expect(service.revokeConsent("agent-a", "legacy/repo", ["contents:read"], "anyone")).resolves.toBeUndefined();
-        expect(await service.checkConsent("agent-a", "legacy/repo", ["contents:read"])).toBe(false);
+        await service.recordConsent("agent-a", "legacy/repo", [
+            "contents:read",
+        ]);
+        await expect(
+            service.revokeConsent(
+                "agent-a",
+                "legacy/repo",
+                ["contents:read"],
+                "anyone"
+            )
+        ).resolves.toBeUndefined();
+        expect(
+            await service.checkConsent("agent-a", "legacy/repo", [
+                "contents:read",
+            ])
+        ).toBe(false);
     });
 
     it("revokeConsent denies cross-user even with multiple agents on same repo", async () => {
-        await service.recordConsent("agent-a", "shared/repo", ["contents:read"], undefined, "UserA");
-        await service.recordConsent("agent-b", "shared/repo", ["contents:write"], undefined, "UserB");
-        await expect(service.revokeConsent("agent-a", "shared/repo", ["contents:read"], "UserB")).rejects.toThrow(ConsentOwnershipError);
+        await service.recordConsent(
+            "agent-a",
+            "shared/repo",
+            ["contents:read"],
+            undefined,
+            "UserA"
+        );
+        await service.recordConsent(
+            "agent-b",
+            "shared/repo",
+            ["contents:write"],
+            undefined,
+            "UserB"
+        );
+        await expect(
+            service.revokeConsent(
+                "agent-a",
+                "shared/repo",
+                ["contents:read"],
+                "UserB"
+            )
+        ).rejects.toThrow(ConsentOwnershipError);
     });
 });

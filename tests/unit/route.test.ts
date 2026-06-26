@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { TEST_SECRET } from "../helpers";
 import { testClient } from "hono/testing";
 import { router } from "@/route";
 import { Hono } from "hono";
@@ -8,7 +9,6 @@ import { env } from "cloudflare:workers";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
-const TEST_SECRET = "test-secret-1234567890123456";
 const MIN_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",

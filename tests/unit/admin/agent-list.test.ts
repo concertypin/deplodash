@@ -3,65 +3,18 @@
  */
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { Hono } from "hono";
-import type { HonoEnv, SessionPayload } from "@/types";
-import { adminRouter } from "@/routes/admin";
-import { sessionMiddleware } from "@/middleware";
+import { contains, makeBaseEnv } from "../../helpers";
+import {
+    createAdminApp,
+    encryptSessionCookie,
+    mockGitHubUser,
+    adminEnv,
+    resetKeyCache,
+} from "./helpers";
 import { registerAgentToken } from "@/middleware/agent-auth";
-import { resetKeyCache, getOrInitKey, encryptWith } from "@/crypto";
 import { env } from "cloudflare:workers";
-import { contains } from "../../helpers";
 
-// ─── Test helpers ────────────────────────────────────────────────────────────
-
-const TEST_SECRET = "test-secret-1234567890123456";
-
-const BASE_ENV: HonoEnv["Bindings"] = {
-    ENCRYPTION_SECRET: TEST_SECRET,
-    GITHUB_CLIENT_ID: "test-client",
-    GITHUB_CLIENT_SECRET: "test-secret",
-    CALLBACK_URL: "http://localhost:5178/callback",
-    KV: env.KV,
-    GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY:
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
-};
-
-function createAdminApp(): { app: Hono<HonoEnv> } {
-    const app = new Hono<HonoEnv>()
-        .use("*", sessionMiddleware())
-        .route("/api/admin", adminRouter);
-    return { app };
-}
-
-async function encryptSessionCookie(ghToken: string): Promise<string> {
-    const key = await getOrInitKey(TEST_SECRET);
-    const payload: SessionPayload = {
-        accessToken: ghToken,
-        refreshToken: "dummy-refresh-token",
-        accessExpiresAt: Date.now() + 3600_000,
-        refreshExpiresAt: Date.now() + 30 * 24 * 3600_000,
-    };
-    return `session=${await encryptWith(key, JSON.stringify(payload))}`;
-}
-
-function mockGitHubUser(login: string): void {
-    vi.stubGlobal(
-        "fetch",
-        vi.fn<typeof fetch>().mockResolvedValue(
-            Response.json({
-                login,
-                id: 1,
-                avatar_url: "",
-                name: "Test User",
-            })
-        )
-    );
-}
-
-function adminEnv(adminUsers: string): HonoEnv["Bindings"] {
-    return { ...BASE_ENV, GITHUB_ADMIN_USERS: adminUsers };
-}
+const BASE_ENV = makeBaseEnv({ KV: env.KV });
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -83,7 +36,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
         const { app } = createAdminApp();
         const resp = await app.fetch(
             new Request("http://localhost/api/admin/agent/list"),
-            adminEnv("admin-bob")
+            adminEnv("admin-bob", BASE_ENV)
         );
         expect(resp.status).toBe(401);
         const body = await resp.json();
@@ -99,7 +52,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
             new Request("http://localhost/api/admin/agent/list", {
                 headers: { Cookie: cookie },
             }),
-            adminEnv("admin-bob")
+            adminEnv("admin-bob", BASE_ENV)
         );
         expect(resp.status).toBe(403);
         const body = await resp.json();
@@ -115,7 +68,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
             new Request("http://localhost/api/admin/agent/list", {
                 headers: { Cookie: cookie },
             }),
-            adminEnv("")
+            adminEnv("", BASE_ENV)
         );
         expect(resp.status).toBe(403);
         const body = await resp.json();
@@ -124,8 +77,18 @@ describe("GET /api/admin/agent/list — authentication", () => {
     });
 
     it("returns 200 with token list when user is admin", async () => {
-        await registerAgentToken(BASE_ENV.KV, "admin-token-1", "agent-alpha", "Alpha Agent");
-        await registerAgentToken(BASE_ENV.KV, "admin-token-2", "agent-beta", "Beta Agent");
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "admin-token-1",
+            "agent-alpha",
+            "Alpha Agent"
+        );
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "admin-token-2",
+            "agent-beta",
+            "Beta Agent"
+        );
 
         mockGitHubUser("admin-bob");
         const { app } = createAdminApp();
@@ -134,7 +97,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
             new Request("http://localhost/api/admin/agent/list", {
                 headers: { Cookie: cookie },
             }),
-            adminEnv("admin-bob")
+            adminEnv("admin-bob", BASE_ENV)
         );
         expect(resp.status).toBe(200);
         const body = await resp.json();
@@ -155,9 +118,11 @@ describe("GET /api/admin/agent/list — authentication", () => {
     it("returns 403 when GitHub API call fails", async () => {
         vi.stubGlobal(
             "fetch",
-            vi.fn<typeof fetch>().mockResolvedValue(
-                new Response("Unauthorized", { status: 401 })
-            )
+            vi
+                .fn<typeof fetch>()
+                .mockResolvedValue(
+                    new Response("Unauthorized", { status: 401 })
+                )
         );
         const { app } = createAdminApp();
         const cookie = await encryptSessionCookie("ghp_bad_token");
@@ -165,7 +130,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
             new Request("http://localhost/api/admin/agent/list", {
                 headers: { Cookie: cookie },
             }),
-            adminEnv("admin-bob")
+            adminEnv("admin-bob", BASE_ENV)
         );
         expect(resp.status).toBe(403);
         const body = await resp.json();
@@ -181,7 +146,7 @@ describe("GET /api/admin/agent/list — authentication", () => {
             new Request("http://localhost/api/admin/agent/list", {
                 headers: { Cookie: cookie },
             }),
-            adminEnv("admin-bob,other-user")
+            adminEnv("admin-bob,other-user", BASE_ENV)
         );
         expect(resp.status).toBe(200);
         const body = await resp.json();

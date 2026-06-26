@@ -1,12 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { jsonResponse } from "../helpers";
 import { GitHubClient } from "@/github";
-
-function jsonResponse(data: unknown, status = 200): Response {
-    return new Response(JSON.stringify(data), {
-        status,
-        headers: { "Content-Type": "application/json" },
-    });
-}
 
 describe("GitHubClient", () => {
     let client: GitHubClient;

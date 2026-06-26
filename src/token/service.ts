@@ -49,10 +49,7 @@ export class TokenService {
     }
 
     /** @see ConsentService.getAllApprovedScopes */
-    getAllApprovedScopes(
-        agentId: string,
-        repo: string
-    ): Promise<string[]> {
+    getAllApprovedScopes(agentId: string, repo: string): Promise<string[]> {
         return this.consentService.getAllApprovedScopes(agentId, repo);
     }
 
@@ -85,12 +82,7 @@ export class TokenService {
         scopes: string[],
         caller?: string
     ): Promise<void> {
-        return this.consentService.revokeConsent(
-            agentId,
-            repo,
-            scopes,
-            caller
-        );
+        return this.consentService.revokeConsent(agentId, repo, scopes, caller);
     }
 
     /** @see ConsentService.revokeAllConsentsForRepo */
@@ -101,11 +93,7 @@ export class TokenService {
     // ─── Token caching ───────────────────────────────────────────────────────
 
     /** @see getCachedToken */
-    getCachedToken(
-        agentId: string,
-        repo: string,
-        scopes: string[]
-    ) {
+    getCachedToken(agentId: string, repo: string, scopes: string[]) {
         return getCachedToken(this.kv, agentId, repo, scopes);
     }
 
@@ -117,14 +105,7 @@ export class TokenService {
         token: string,
         expiresAt: string
     ): Promise<void> {
-        return cacheToken(
-            this.kv,
-            agentId,
-            repo,
-            scopes,
-            token,
-            expiresAt
-        );
+        return cacheToken(this.kv, agentId, repo, scopes, token, expiresAt);
     }
 
     // ─── High-level flow ────────────────────────────────────────────────────

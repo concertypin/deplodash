@@ -14,18 +14,26 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
     GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 
-beforeEach(() => { resetKeyCache(); });
+beforeEach(() => {
+    resetKeyCache();
+});
 
 describe("POST /api/token (authenticated, needs consent)", () => {
     const app = new Hono<HonoEnv>().route("/api", tokenRouter);
     const client = testClient(app, BASE_ENV);
 
     beforeEach(async () => {
-        await registerAgentToken(BASE_ENV.KV, "test-agent-token", "test-agent", "Test Agent");
+        await registerAgentToken(
+            BASE_ENV.KV,
+            "test-agent-token",
+            "test-agent",
+            "Test Agent"
+        );
     });
 
     it("returns needs_consent because consent is checked before any GitHub API call", async () => {

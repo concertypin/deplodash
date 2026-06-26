@@ -13,7 +13,12 @@ describe("POST /api/token (without GitHub App configured)", () => {
     beforeEach(async () => {
         const { keys } = await env.KV.list();
         await Promise.all(keys.map((k) => env.KV.delete(k.name)));
-        await registerAgentToken(env.KV, "noapp-agent-token", "noapp-agent", "No App Agent");
+        await registerAgentToken(
+            env.KV,
+            "noapp-agent-token",
+            "noapp-agent",
+            "No App Agent"
+        );
     });
 
     it("returns 400 when GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are not set", async () => {

@@ -63,14 +63,18 @@ describe("pemToCryptoKey", () => {
     it("accepts a PKCS#8 PEM string", async () => {
         const key = await pemToCryptoKey(pkcs8Pem);
         expect(key).toBeDefined();
-        expect((key.algorithm as RsaHashedKeyAlgorithm).name).toBe("RSASSA-PKCS1-v1_5");
+        expect((key.algorithm as RsaHashedKeyAlgorithm).name).toBe(
+            "RSASSA-PKCS1-v1_5"
+        );
         expect(key.type).toBe("private");
     });
 
     it("accepts a PKCS#1 PEM string (auto-converts to PKCS#8)", async () => {
         const key = await pemToCryptoKey(pkcs1Pem);
         expect(key).toBeDefined();
-        expect((key.algorithm as RsaHashedKeyAlgorithm).name).toBe("RSASSA-PKCS1-v1_5");
+        expect((key.algorithm as RsaHashedKeyAlgorithm).name).toBe(
+            "RSASSA-PKCS1-v1_5"
+        );
     });
 
     it("accepts a base64-encoded PEM string", async () => {
@@ -85,11 +89,14 @@ describe("pemToCryptoKey", () => {
     });
 
     it("throws on unrecognised format", async () => {
-        await expect(pemToCryptoKey("not-a-key!")).rejects.toThrow(/unrecognised key format/i);
+        await expect(pemToCryptoKey("not-a-key!")).rejects.toThrow(
+            /unrecognised key format/i
+        );
     });
 
     it("throws on empty PEM body", async () => {
-        const emptyPem = "-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----";
+        const emptyPem =
+            "-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----";
         await expect(pemToCryptoKey(emptyPem)).rejects.toThrow(/empty/i);
     });
 });
