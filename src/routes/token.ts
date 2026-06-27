@@ -15,8 +15,8 @@ import { validator, describeRoute, resolver } from "hono-openapi";
 import * as z from "zod";
 import type { HonoEnv } from "@/types";
 import { agentAuthMiddleware } from "@/middleware/agent-auth";
-import { TokenService } from "@/token-service";
-import { GitHubApp } from "@/github-app";
+import { TokenService } from "@/token/service";
+import { GitHubApp } from "@/github/app";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,17 @@ const needsConsentResponseSchema = z.object({
 const errorResponseSchema = z.object({
     error: z.string(),
 });
+
+// ─── Safe error patterns (messages that are safe to return to callers) ────────
+
+const KNOWN_SAFE_ERRORS: RegExp[] = [
+    /^GitHub App is not installed/i,
+    /^Failed to check (org|user) installation/i,
+    /^Failed to check repo existence/i,
+    /^Failed to create repo/i,
+    /^GitHub App token request failed/i,
+    /^Could not resolve installation/i,
+];
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api — relative paths
@@ -110,6 +121,25 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const gh = new GitHubApp(appId, privateKey);
             const [owner, name] = repo.split("/") as [string, string];
             const tokenService = new TokenService(c.env.KV);
+            const agentId = c.get("agent_id")!;
+
+            // Rate limiting — per-agent throttle to protect GitHub API quota
+            const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+            if (rateLimiter) {
+                try {
+                    const { success } = await rateLimiter.limit({
+                        key: agentId,
+                    });
+                    if (!success) {
+                        return c.json(
+                            { error: "Rate limited. Try again later." },
+                            429
+                        );
+                    }
+                } catch {
+                    // Rate limiter unavailable (e.g., local dev) — proceed
+                }
+            }
 
             // Determine base URL for consent redirect
             const url = new URL(c.req.url);
@@ -117,15 +147,18 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
             // Check consent — supports granular approval (user may have approved a subset)
             const effectiveScopes: string[] | null =
-                await tokenService.findConsentScopes(repo, scopes);
+                await tokenService.findConsentScopes(agentId, repo, scopes);
 
             if (!effectiveScopes) {
                 // No matching consent found — check if the user has approved ANY scopes for this repo
-                const approvedScopes =
-                    await tokenService.getAllApprovedScopes(repo);
+                const approvedScopes = await tokenService.getAllApprovedScopes(
+                    agentId,
+                    repo
+                );
                 const consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                    `&scopes=${encodeURIComponent(scopes.join(","))}`;
+                    `&scopes=${encodeURIComponent(scopes.join(","))}` +
+                    `&agent_id=${encodeURIComponent(agentId)}`;
 
                 return c.json(
                     {
@@ -144,6 +177,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
             const cached = await tokenService.getCachedToken(
+                agentId,
                 repo,
                 effectiveScopes
             );
@@ -160,6 +194,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             await gh.ensureRepoExists(owner, name);
             const tokenResult = await gh.requestToken(effectiveScopes, owner);
             await tokenService.cacheToken(
+                agentId,
                 repo,
                 effectiveScopes,
                 tokenResult.token,
@@ -174,7 +209,11 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return c.json({ error: msg }, 500);
+            // Sanitize: only pass through known-safe messages; use generic fallback
+            const safe = KNOWN_SAFE_ERRORS.some((p) => p.test(msg))
+                ? msg
+                : "An internal error occurred while processing the token request.";
+            return c.json({ error: safe }, 500);
         }
     }
 );

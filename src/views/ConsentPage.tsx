@@ -7,13 +7,16 @@
 
 import type { FC } from "hono/jsx";
 import { Layout } from "./Layout";
-import { SCOPE_CATEGORIES, SCOPE_LABELS } from "@/types";
+import { SCOPE_CATEGORIES, SCOPE_LABELS } from "@/github/scopes";
 
 interface ConsentPageProps {
     repo: string;
     scopes: string;
     error?: string;
     success?: boolean;
+    agentId?: string;
+    /** Encrypted requested scopes — prevents client-side tampering of the hidden field. */
+    requestedScopesEnc?: string;
 }
 
 /**
@@ -59,6 +62,8 @@ export const ConsentPage: FC<ConsentPageProps> = ({
     scopes,
     error,
     success,
+    agentId,
+    requestedScopesEnc,
 }) => {
     const scopeList = scopes
         .split(",")
@@ -76,7 +81,7 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                             <h2 class="card-title mb-2">
                                 🔑 Authorize Agent Access
                             </h2>
-                            <p class="text-sm text-base-content/60 mb-4">
+                            <p class="text-sm text-base-content/60 mb-2">
                                 An agent is requesting access to
                                 <span class="font-mono font-semibold ml-1">
                                     {repo}
@@ -84,6 +89,20 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                 . Select the permissions you want to grant, then
                                 confirm.
                             </p>
+                            {agentId && (
+                                <div class="bg-base-300 rounded-lg p-3 mb-4 flex items-center gap-2">
+                                    <i
+                                        data-lucide="bot"
+                                        class="w-4 h-4 text-primary"
+                                    />
+                                    <span class="text-sm">
+                                        Agent:{" "}
+                                        <span class="font-mono font-semibold">
+                                            {agentId}
+                                        </span>
+                                    </span>
+                                </div>
+                            )}
 
                             {error && (
                                 <div class="alert alert-error mb-4">
@@ -117,6 +136,20 @@ export const ConsentPage: FC<ConsentPageProps> = ({
                                         name="requested_scopes"
                                         value={scopes}
                                     />
+                                    {requestedScopesEnc && (
+                                        <input
+                                            type="hidden"
+                                            name="requested_scopes_enc"
+                                            value={requestedScopesEnc}
+                                        />
+                                    )}
+                                    {agentId && (
+                                        <input
+                                            type="hidden"
+                                            name="agent_id"
+                                            value={agentId}
+                                        />
+                                    )}
 
                                     <div class="bg-base-300 rounded-lg p-4 mb-4">
                                         <div class="font-semibold mb-3">

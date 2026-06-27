@@ -12,6 +12,8 @@ export interface ConsentItem {
     repo: string;
     scopes: string;
     granted_at: string;
+    granted_by?: string;
+    agent_id?: string;
 }
 
 interface HomePageProps {
@@ -146,6 +148,7 @@ const ConsentList: FC<{ consents: ConsentItem[] }> = ({ consents }) => (
                         <tr>
                             <th>Repository</th>
                             <th>Scopes</th>
+                            <th>Granted By</th>
                             <th>Granted</th>
                             <th>Action</th>
                         </tr>
@@ -185,6 +188,11 @@ const ConsentRow: FC<{ item: ConsentItem }> = ({ item }) => {
                     ))}
                 </div>
             </td>
+            <td class="text-sm text-base-content/60">
+                {item.granted_by ?? (
+                    <span class="text-base-content/40">&mdash;</span>
+                )}
+            </td>
             <td class="text-sm text-base-content/60">{grantedDate}</td>
             <td>
                 <form
@@ -194,6 +202,13 @@ const ConsentRow: FC<{ item: ConsentItem }> = ({ item }) => {
                 >
                     <input type="hidden" name="repo" value={item.repo} />
                     <input type="hidden" name="scopes" value={item.scopes} />
+                    {item.agent_id && (
+                        <input
+                            type="hidden"
+                            name="agent_id"
+                            value={item.agent_id}
+                        />
+                    )}
                     <button type="submit" class="btn btn-error btn-xs gap-1">
                         <i data-lucide="x-circle" class="w-3 h-3" />
                         Revoke

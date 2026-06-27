@@ -24,6 +24,11 @@ export type Env = {
      */
     GITHUB_TOKEN?: string;
     /**
+     * Comma-separated list of GitHub usernames allowed to access admin endpoints.
+     * If not set or empty, admin endpoints return 403.
+     */
+    GITHUB_ADMIN_USERS?: string;
+    /**
      * Cloudflare KV namespace for agent tokens, consent records, and token cache.
      */
     KV: KVNamespace;
@@ -35,6 +40,12 @@ export type Env = {
      * PEM-encoded RSA private key for the GitHub App (required for token issuance).
      */
     GITHUB_APP_PRIVATE_KEY: string;
+    /**
+     * Cloudflare Rate Limiting binding for /api/token endpoint.
+     * Optional — rate limiting is a best-effort guard and gracefully skipped
+     * when the binding is not available (e.g., local dev, test environments).
+     */
+    TOKEN_RATE_LIMITER?: RateLimit;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────
@@ -89,145 +100,6 @@ export type AgentInfo = {
 };
 
 /**
- * Scope presets for GitHub App Installation Tokens.
- */
-export type ScopePreset =
-    | "contents:read"
-    | "contents:write"
-    | "contents:write+workflows:write"
-    | "admin";
-
-/**
- * All supported scopes for GitHub App Installation Tokens.
- */
-export type Scope =
-    | "contents:read"
-    | "contents:write"
-    | "issues:read"
-    | "issues:write"
-    | "pulls:read"
-    | "pulls:write"
-    | "actions:read"
-    | "actions:write"
-    | "metadata:read"
-    | "deployments:read"
-    | "deployments:write"
-    | "administration:read"
-    | "administration:write"
-    | "members:read"
-    | "members:write"
-    | "secrets:read"
-    | "secrets:write"
-    | "pages:read"
-    | "pages:write"
-    | "webhooks:read"
-    | "webhooks:write"
-    | "environments:read"
-    | "environments:write"
-    | "variables:read"
-    | "variables:write"
-    | "workflows:write"
-    | "checks:read"
-    | "checks:write";
-
-/**
- * Human-readable labels for each scope.
- */
-export const SCOPE_LABELS: Record<string, string> = {
-    "contents:read": "Read repository contents",
-    "contents:write": "Read & write repository contents",
-    "issues:read": "Read issues",
-    "issues:write": "Read & write issues",
-    "pulls:read": "Read pull requests",
-    "pulls:write": "Read & write pull requests",
-    "actions:read": "View Actions workflows & runs",
-    "actions:write": "Manage Actions workflows & runs",
-    "metadata:read": "Read repository metadata",
-    "deployments:read": "View deployments",
-    "deployments:write": "Manage deployments",
-    "administration:read": "View repository settings",
-    "administration:write": "Manage repository settings (rename, delete)",
-    "members:read": "View collaborators",
-    "members:write": "Manage collaborators",
-    "secrets:read": "View repository secrets & variables",
-    "secrets:write": "Manage repository secrets & variables",
-    "pages:read": "View GitHub Pages settings",
-    "pages:write": "Manage GitHub Pages settings & builds",
-    "webhooks:read": "View webhooks",
-    "webhooks:write": "Manage webhooks",
-    "environments:read": "View environments",
-    "environments:write": "Manage environments",
-    "variables:read": "View Actions variables",
-    "variables:write": "Manage Actions variables",
-    "workflows:write": "Manage workflow files",
-    "checks:read": "View check runs & suites",
-    "checks:write": "Create & update check runs",
-};
-
-/**
- * Scope categories for UI grouping.
- * Keyed by category ID.
- */
-export const SCOPE_CATEGORIES: Record<
-    string,
-    { label: string; scopes: string[] }
-> = {
-    contents: {
-        label: "📂 Repository Contents",
-        scopes: ["contents:read", "contents:write", "workflows:write"],
-    },
-    issues: {
-        label: "🔀 Issues",
-        scopes: ["issues:read", "issues:write"],
-    },
-    pulls: {
-        label: "🔁 Pull Requests",
-        scopes: ["pulls:read", "pulls:write"],
-    },
-    actions: {
-        label: "✅ Actions & CI",
-        scopes: [
-            "actions:read",
-            "actions:write",
-            "checks:read",
-            "checks:write",
-            "variables:read",
-            "variables:write",
-        ],
-    },
-    metadata: {
-        label: "📋 Metadata",
-        scopes: ["metadata:read", "deployments:read", "deployments:write"],
-    },
-    administration: {
-        label: "🔐 Administration",
-        scopes: ["administration:read", "administration:write"],
-    },
-    security: {
-        label: "🛡️ Security & Access",
-        scopes: [
-            "secrets:read",
-            "secrets:write",
-            "members:read",
-            "members:write",
-        ],
-    },
-    pages: {
-        label: "🌐 Pages & Webhooks",
-        scopes: [
-            "pages:read",
-            "pages:write",
-            "webhooks:read",
-            "webhooks:write",
-        ],
-    },
-    environments: {
-        label: "🗂️ Environments",
-        scopes: ["environments:read", "environments:write"],
-    },
-};
-
-/**
  * A consent record stored in KV.
  * Stored under key `consent:${repo}:${scopesHash}`.
  */
@@ -242,6 +114,8 @@ export type ConsentRecord = {
     agent_id?: string;
     /** Optional: the originally requested scopes (before granular filtering). */
     requested_scopes?: string;
+    /** GitHub user login who granted this consent. */
+    granted_by?: string;
 };
 
 /**
@@ -253,6 +127,10 @@ export type ConsentEntry = {
     granted_at: string;
     /** Originally requested scopes, if available (for showing granular diff on dashboard). */
     requested_scopes?: string;
+    /** GitHub user login who granted this consent. */
+    granted_by?: string;
+    /** Agent ID that this consent was recorded for. */
+    agent_id?: string;
 };
 
 /**

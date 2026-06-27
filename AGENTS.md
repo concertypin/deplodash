@@ -19,7 +19,7 @@ repository, deplodash creates it automatically.
     - **`middleware/`** — Session cookie auth, Bearer token auth for agents
     - Core modules: `crypto.ts`, `github-app.ts`, `github.ts`, `token-service.ts`, `helpers.ts`, `types.ts`, `errors.ts`
     - Utilities: `cors.ts`
-- **`tests/`** — Vitest test suite (180+ tests, 95%+ coverage)
+- **`tests/`** — Vitest test suite (211 tests, 87%+ coverage)
 
 ## Environment Variables
 
@@ -39,9 +39,17 @@ Set in `.dev.vars` for local dev, or via `wrangler secret put` / Cloudflare dash
 
 ### Optional (dev/testing)
 
-| Variable       | Description                     |
-| -------------- | ------------------------------- |
-| `GITHUB_TOKEN` | Direct GitHub PAT (skips OAuth) |
+| Variable             | Description                             |
+| -------------------- | --------------------------------------- |
+| `GITHUB_TOKEN`       | Direct GitHub PAT (skips OAuth)         |
+| `GITHUB_ADMIN_USERS` | Comma-separated list of admin usernames |
+
+### Cloudflare Bindings
+
+| Binding              | Description                                      |
+| -------------------- | ------------------------------------------------ |
+| `KV`                 | Cloudflare KV namespace (consent, tokens, cache) |
+| `TOKEN_RATE_LIMITER` | Rate Limiting for /api/token (100 req/60s)       |
 
 ## Development Commands
 
@@ -92,3 +100,17 @@ Configuration is in `wrangler.jsonc`.
 - **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` batches KV gets (50 at a time) for performance but still does not handle `kv.list()` cursor-based pagination. At most 1000 consent records returned per page.
 - **`github-app.ts` `resolveInstallationId`** — Does not cache installation IDs across requests. Each request to a different owner triggers a fresh GitHub API call. Consider adding KV-based caching with TTL.
 - **`api.ts`** — Empty legacy v1 API placeholder. Consider removing if not needed.
+
+## Resolved Issues
+
+### D-001 — Cross-user Consent Exposure
+
+`listConsents()` now accepts `grantedBy?` filter; `revokeConsent()` has `caller?` ownership check. Dashboard scoped to current user.
+
+### F-DIS-004 — Token API Rate Limiting
+
+Cloudflare `ratelimit` binding added (`TOKEN_RATE_LIMITER`, 100 req/60s per agent_id). 429 on overflow.
+
+### M-003 — GitHub API Error Leak
+
+All error throws in `github-app.ts` strip API response bodies. `token.ts` catch uses `KNOWN_SAFE_ERRORS` allowlist.

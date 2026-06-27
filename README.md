@@ -11,6 +11,9 @@ Built with Hono on Cloudflare Workers.
 - **Token caching** — Installation tokens are cached in KV to minimize GitHub API calls
 - **OAuth login** — PKCE-based GitHub OAuth for user authentication (consent page only)
 - **Scoped permissions** — `contents:read`, `contents:write`, `workflows:write`, `admin`
+- **Rate limiting** — Per-agent rate limiting via Cloudflare's native ratelimit binding (100 req/60s)
+- **Consent ownership** — Users see and manage only their own consents; cross-user revocation blocked
+- **Error safety** — GitHub API error details are sanitized before returning to callers
 - **OpenAPI docs** — Auto-generated API documentation at `/docs`
 
 ## Quick Start
@@ -22,7 +25,7 @@ pnpm install
 cp .dev.vars.example .dev.vars
 
 pnpm dev     # → http://localhost:5178
-pnpm test    # 180+ tests
+pnpm test    # 211 tests
 pnpm build   # → dist/
 ```
 
