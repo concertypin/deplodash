@@ -29,7 +29,7 @@
     "ratelimits": [
         {
             "name": "TOKEN_RATE_LIMITER",
-            "namespace_id": "157473395730938482755579844734405641010",
+            "namespace_id": "157473395730",
             "simple": {
                 "limit": 10,
                 "period": 10,
