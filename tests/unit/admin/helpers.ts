@@ -27,16 +27,14 @@ export async function encryptSessionCookie(ghToken: string): Promise<string> {
 export function mockGitHubUser(login: string): void {
     vi.stubGlobal(
         "fetch",
-        vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(
-                Response.json({
-                    login,
-                    id: 1,
-                    avatar_url: "",
-                    name: "Test User",
-                })
-            )
+        vi.fn<typeof fetch>().mockResolvedValue(
+            Response.json({
+                login,
+                id: 1,
+                avatar_url: "",
+                name: "Test User",
+            })
+        )
     );
 }
 
