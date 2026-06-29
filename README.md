@@ -10,6 +10,7 @@ Built with Hono on Cloudflare Workers.
 - **Consent management** — Repository owners approve agent access via a web consent page
 - **Token caching** — Installation tokens are cached in KV to minimize GitHub API calls
 - **OAuth login** — PKCE-based GitHub OAuth for user authentication (consent page only)
+- **Git credential helper** — Use deplodash as a git credential helper for automatic token injection on push
 - **Scoped permissions** — `contents:read`, `contents:write`, `workflows:write`, `admin`
 - **Rate limiting** — Per-agent rate limiting via Cloudflare's native ratelimit binding (100 req/60s)
 - **Consent ownership** — Users see and manage only their own consents; cross-user revocation blocked
@@ -98,6 +99,40 @@ Only needed for the consent page authentication:
     - Local: `http://localhost:5178/callback`
     - Production: `https://your-worker.workers.dev/callback`
 3. Copy the Client ID and Client Secret to `.dev.vars`
+
+## Git Credential Helper
+
+Use deplodash as a [Git credential helper](https://git-scm.com/docs/gitcredentials)
+to automatically obtain short-lived GitHub installation tokens — no SSH deploy key
+or manual PAT setup needed.
+
+### Prerequisites
+
+1. A deplodash agent token (pre-registered in KV)
+2. [Deno](https://deno.com) installed locally
+
+### Setup
+
+```sh
+# Install the helper script
+mkdir -p ~/.local/share/deplodash
+cp scripts/deplodash-credential-helper.ts ~/.local/share/deplodash/
+
+# Register with git (replace AGENT_TOKEN with your actual token)
+git config --global credential.https://github.com.helper \
+  "!DEPLODASH_AGENT_TOKEN=<your-token> $(which deno) run --allow-net --allow-env --allow-read \
+    \$HOME/.local/share/deplodash/deplodash-credential-helper.ts"
+```
+
+Now every `git push` to GitHub will automatically:
+
+1. Call deplodash's `/api/token` with `contents:write` scope
+2. Get a fresh `ghs_` token back
+3. Pass it to git
+
+> **Note:** First-time use for a new repo may require [consent approval](https://deplodash.condev.workers.dev/auth/consent) via the web UI.
+>
+> Set `DEPLODASH_SCOPES` for other scopes: `DEPLODASH_SCOPES=contents:read,workflows:write`
 
 ## Architecture
 

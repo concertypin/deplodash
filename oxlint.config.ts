@@ -23,6 +23,7 @@ export default defineConfig({
         "**/.git/**",
         "**/.wrangler/**",
         "**/legacy/**",
+        "**/scripts/deplodash-credential-helper.ts",
     ],
     overrides: [
         {
