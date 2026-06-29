@@ -67,18 +67,53 @@ Uses the session cookie created by the login flow and returns the user OAuth tok
 
 ## Git Credential Helper
 
-### HTTPS with credential helper (persistent)
+For automated token injection on `git push`, use the deplodash credential helper.
+
+### Prerequisites
+
+- [Deno](https://deno.com) installed locally
+- An agent token (provisioned by the deplodash admin)
+
+### Setup (recommended — scopes auto-detected)
 
 ```sh
-# Set remote to HTTPS (not SSH)
-git remote set-url origin https://github.com/owner/repo.git
+# Download the helper script
+mkdir -p ~/.local/share/deplodash
+curl -sSL "{{BASE}}/llms.txt" | grep -oP 'https?://[^"]*credential-helper[^"]*' || \
+  echo "Download from: https://github.com/concertypin/deplodash/blob/main/scripts/deplodash-credential-helper.ts"
+cp scripts/deplodash-credential-helper.ts ~/.local/share/deplodash/
 
-# Configure credential helper to fetch tokens from deplodash
+# Register with git
+git config --global credential.https://github.com.helper \
+  "!DEPLODASH_AGENT_TOKEN=<your-token> $(which deno) run \
+    --allow-net --allow-env --allow-read --allow-run \
+    \$HOME/.local/share/deplodash/deplodash-credential-helper.ts"
+```
+
+The helper auto-detects required scopes by examining the pending diff:
+
+- → `contents:write` for code changes
+- → adds `workflows:write` when `.github/workflows/` files are detected
+
+Override scopes explicitly: `DEPLODASH_SCOPES=contents:read,workflows:write`
+
+### Quick fallback (single repo, curl)
+
+```sh
+git remote set-url origin https://github.com/owner/repo.git
 git config credential.helper "!f() {
   echo username=x-access-token
-  echo password=$(curl -s -X POST {{BASE}}/api/token     -H 'Authorization: Bearer YOUR_AGENT_TOKEN'     -H 'Content-Type: application/json'     -d '{\"repo\":\"owner/repo\",\"scopes\":[\"contents:write\"]}'     | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+  echo password=\$(curl -s -X POST {{BASE}}/api/token \
+    -H 'Authorization: Bearer YOUR_AGENT_TOKEN' \
+    -H 'Content-Type: application/json' \
+    -d '{\"repo\":\"owner/repo\",\"scopes\":[\"contents:write\"]}' \
+    | grep -o '\"token\":\"[^\"]*\"' | cut -d'\"' -f4)
 }; f"
 ```
+
+### First-time consent
+
+On first use for a new repo, deplodash may return a `needs_consent` response. The credential helper prints a consent URL; open it in a browser to approve the scopes, then retry.
 
 ## Permissions
 
