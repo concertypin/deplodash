@@ -79,9 +79,8 @@ For automated token injection on `git push`, use the deplodash credential helper
 ```sh
 # Download the helper script
 mkdir -p ~/.local/share/deplodash
-curl -sSL "{{BASE}}/llms.txt" | grep -oP 'https?://[^"]*credential-helper[^"]*' || \
-  echo "Download from: https://github.com/concertypin/deplodash/blob/main/scripts/deplodash-credential-helper.ts"
-cp scripts/deplodash-credential-helper.ts ~/.local/share/deplodash/
+curl -sSL -o ~/.local/share/deplodash/deplodash-credential-helper.ts \
+  "https://raw.githubusercontent.com/concertypin/deplodash/main/scripts/deplodash-credential-helper.ts"
 
 # Register with git
 git config --global credential.https://github.com.helper \

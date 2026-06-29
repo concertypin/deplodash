@@ -24,6 +24,7 @@
  *         \$HOME/.local/share/deplodash/deplodash-credential-helper.ts"
  */
 
+const TIMEOUT_MS = 15_000;
 const DEPLODASH_URL =
     Deno.env.get("DEPLODASH_URL") ?? "https://deplodash.condev.workers.dev";
 const AGENT_TOKEN = Deno.env.get("DEPLODASH_AGENT_TOKEN");
@@ -42,9 +43,10 @@ const text = new TextDecoder().decode(await Deno.readAll(Deno.stdin));
 
 const params: Record<string, string> = {};
 for (const line of text.split("\n")) {
-    const eqIdx = line.indexOf("=");
+    const trimmed = line.trim();
+    const eqIdx = trimmed.indexOf("=");
     if (eqIdx > 0) {
-        params[line.slice(0, eqIdx)] = line.slice(eqIdx + 1);
+        params[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
     }
 }
 
@@ -152,19 +154,45 @@ console.error(
 // ── Handle credential actions ─────────────────────────────────────────────
 
 if (action === "get") {
-    const response = await fetch(`${DEPLODASH_URL}/api/token`, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${AGENT_TOKEN}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ repo, scopes }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+    let response: Response;
+    try {
+        response = await fetch(`${DEPLODASH_URL}/api/token`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${AGENT_TOKEN}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ repo, scopes }),
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+            console.error(
+                "deplodash-credential-helper: token request timed out"
+            );
+        } else {
+            console.error(
+                `deplodash-credential-helper: token request failed: ${err}`
+            );
+        }
+        Deno.exit(1);
+    } finally {
+        clearTimeout(timer);
+    }
 
     if (response.status === 202) {
-        const data = await response.json();
+        let url = "unknown";
+        try {
+            const data = await response.json();
+            if (data?.url) url = data.url;
+        } catch {
+            // non-JSON response, use fallback url string
+        }
         console.error(
-            `deplodash-credential-helper: consent required — open ${data.url}`
+            `deplodash-credential-helper: consent required — open ${url}`
         );
         Deno.exit(1);
     }
@@ -177,10 +205,18 @@ if (action === "get") {
         Deno.exit(1);
     }
 
-    const data = await response.json();
-    const token = data.token;
+    let data: Record<string, unknown>;
+    try {
+        data = await response.json();
+    } catch {
+        console.error(
+            "deplodash-credential-helper: invalid JSON in token response"
+        );
+        Deno.exit(1);
+    }
 
-    if (!token) {
+    const token = data?.token;
+    if (typeof token !== "string" || !token) {
         console.error("deplodash-credential-helper: no token in response");
         Deno.exit(1);
     }
