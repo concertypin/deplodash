@@ -115,25 +115,33 @@ or manual PAT setup needed.
 ### Setup
 
 ```sh
-# Install the helper script
+# Download the helper script
 mkdir -p ~/.local/share/deplodash
-cp scripts/deplodash-credential-helper.ts ~/.local/share/deplodash/
+curl -sSL -o ~/.local/share/deplodash/deplodash-credential-helper.ts \
+  "https://raw.githubusercontent.com/concertypin/deplodash/main/scripts/deplodash-credential-helper.ts"
 
 # Register with git (replace AGENT_TOKEN with your actual token)
 git config --global credential.https://github.com.helper \
-  "!DEPLODASH_AGENT_TOKEN=<your-token> $(which deno) run --allow-net --allow-env --allow-read \
+  "!DEPLODASH_AGENT_TOKEN=<your-token> $(which deno) run \
+    --allow-net --allow-env --allow-read --allow-run \
     \$HOME/.local/share/deplodash/deplodash-credential-helper.ts"
 ```
 
 Now every `git push` to GitHub will automatically:
 
-1. Call deplodash's `/api/token` with `contents:write` scope
-2. Get a fresh `ghs_` token back
-3. Pass it to git
+1. Detect changed files and determine required scopes
+2. Call deplodash's `/api/token` with the right scopes
+3. Get a fresh `ghs_` token back and pass it to git
 
-> **Note:** First-time use for a new repo may require [consent approval](https://deplodash.condev.workers.dev/auth/consent) via the web UI.
->
-> Set `DEPLODASH_SCOPES` for other scopes: `DEPLODASH_SCOPES=contents:read,workflows:write`
+### First-time consent
+
+When pushing to a repo for the first time, deplodash may return a `needs_consent` response.
+The helper prints a consent URL — open it in a browser to approve the scopes, then retry the push.
+
+### Override scopes
+
+Set `DEPLODASH_SCOPES` to bypass auto-detection:
+`DEPLODASH_SCOPES=contents:read,workflows:write`
 
 ## Architecture
 
