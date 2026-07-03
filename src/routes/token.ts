@@ -17,6 +17,7 @@ import type { HonoEnv } from "@/types";
 import { agentAuthMiddleware } from "@/middleware/agent-auth";
 import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
+import { addWaiter } from "@/token/wait-notifier";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -215,5 +216,140 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 : "An internal error occurred while processing the token request.";
             return c.json({ error: safe }, 500);
         }
+    }
+);
+
+tokenRouter.on(
+    "QUERY",
+    "/wait",
+    agentAuthMiddleware(),
+    describeRoute({
+        description:
+            "Wait for a user to approve a token request (Long Polling)",
+        responses: {
+            204: {
+                description: "Consent granted",
+            },
+            403: {
+                description:
+                    "Timeout (Consent not granted within the wait period)",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            400: {
+                description: "Bad request",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            401: {
+                description: "Invalid or missing agent token",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+        },
+    }),
+    validator("json", requestTokenSchema),
+    async (c) => {
+        const { repo, scopes } = c.req.valid("json");
+        const agentId = c.get("agent_id")!;
+        const tokenService = new TokenService(c.env.KV);
+
+        // First check if consent is already granted
+        const effectiveScopes = await tokenService.findConsentScopes(
+            agentId,
+            repo,
+            scopes
+        );
+        if (effectiveScopes) {
+            return new Response(null, { status: 204 });
+        }
+
+        // Wait for up to 1 minute 30 seconds (90s)
+        const TIMEOUT_MS = 90 * 1000;
+        const POLL_INTERVAL_MS = 5000;
+
+        return new Promise<Response>((resolve) => {
+            const timeoutId = setTimeout(() => {
+                finishWithTimeout();
+            }, TIMEOUT_MS);
+
+            const pollIntervalId = setInterval(() => {
+                void (async () => {
+                    try {
+                        const currentScopes =
+                            await tokenService.findConsentScopes(
+                                agentId,
+                                repo,
+                                scopes
+                            );
+                        if (currentScopes) {
+                            finishWithSuccess();
+                        }
+                    } catch (e) {
+                        console.error("Error polling for consent", e);
+                    }
+                })();
+            }, POLL_INTERVAL_MS);
+
+            const cleanup = () => {
+                clearTimeout(timeoutId as unknown as number);
+                clearInterval(pollIntervalId as unknown as number);
+                if (removeWaiter) removeWaiter();
+            };
+
+            const finishWithSuccess = () => {
+                cleanup();
+                resolve(new Response(null, { status: 204 }));
+            };
+
+            const finishWithTimeout = () => {
+                cleanup();
+                resolve(
+                    c.json(
+                        { error: "Timeout waiting for consent approval" },
+                        403
+                    )
+                );
+            };
+
+            // 1. Setup in-isolate module-level Map for instant notification
+            let removeWaiter: (() => void) | undefined; // oxlint-disable-line prefer-const
+            removeWaiter = addWaiter(repo, agentId, () => {
+                void (async () => {
+                    try {
+                        // Double check with KV to be sure
+                        const currentScopes =
+                            await tokenService.findConsentScopes(
+                                agentId,
+                                repo,
+                                scopes
+                            );
+                        if (currentScopes) {
+                            finishWithSuccess();
+                        }
+                    } catch (e) {
+                        console.error("Error in wait-notifier listener", e);
+                    }
+                })();
+            });
+
+            // Cloudflare Workers specific: Ensure the promise resolves if the client disconnects
+            if (c.req.raw.signal) {
+                c.req.raw.signal.addEventListener("abort", () => {
+                    cleanup();
+                    // Resolving with a dummy response, the client already disconnected
+                    resolve(new Response(null, { status: 499 }));
+                });
+            }
+        });
     }
 );

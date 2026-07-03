@@ -61,6 +61,35 @@ The returned `effective_scopes` may be narrower than the requested scopes if the
 
 Send the consent URL to the user. Once they approve, retry the request. If the user already approved some compatible scopes, the response may include those as `approved_scopes`.
 
+### QUERY /api/wait — Wait for User Consent (Long Polling)
+
+If you receive a `needs_consent` response from `POST /api/token`, you can use the `QUERY /api/wait` endpoint to wait for the user to approve the request, rather than polling `POST /api/token` repeatedly.
+
+This endpoint supports the HTTP `QUERY` method ([RFC 10008](https://datatracker.ietf.org/doc/rfc10008/)). It takes the exact same authorization header and JSON body as `POST /api/token`.
+
+**Request:**
+
+```json
+QUERY /api/wait
+Authorization: Bearer <agent_token>
+Content-Type: application/json
+
+{
+    "repo": "owner/repo-name",
+    "scopes": ["contents:write"]
+}
+```
+
+**Response (ok - Consent Granted):**
+
+- `204 No Content`
+- The connection will be kept open (up to 1 minute 30 seconds) until the user grants consent. Once consent is granted, it responds immediately with `204`. You can then call `POST /api/token` again to retrieve your token.
+
+**Response (timeout):**
+
+- `403 Forbidden`
+- If the user does not grant consent within 1 minute 30 seconds, the request will time out with a `403` status code.
+
 ### GET /api/user/token — Return the signed-in user OAuth token
 
 Uses the session cookie created by the login flow and returns the user OAuth token for browser-driven operations.

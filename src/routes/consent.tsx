@@ -22,6 +22,7 @@ import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 import { encryptWith, decryptWith, getOrInitKey } from "@/crypto";
 import { renderPage, ConsentPage } from "@/views";
+import { notifyWaiters } from "@/token/wait-notifier";
 
 // Static set of all known scope strings — defined once at module level to avoid
 // reallocation on every request.
@@ -237,6 +238,10 @@ export const consentRouter = new Hono<HonoEnv>()
                     requestedList,
                     grantedBy
                 );
+
+                // Notify any long-polling clients that consent was granted
+                notifyWaiters(repo, agent_id ?? "");
+
                 const successScopes = scopeList.join(",");
                 const html = renderPage(
                     <ConsentPage
