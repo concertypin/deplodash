@@ -278,6 +278,28 @@ tokenRouter.on(
         const POLL_INTERVAL_MS = 5000;
 
         return new Promise<Response>((resolve) => {
+            let finished = false;
+
+            // 1. Setup in-isolate module-level Map for instant notification
+            const removeWaiter = addWaiter(repo, agentId, () => {
+                void (async () => {
+                    try {
+                        // Double check with KV to be sure
+                        const currentScopes =
+                            await tokenService.findConsentScopes(
+                                agentId,
+                                repo,
+                                scopes
+                            );
+                        if (currentScopes) {
+                            finishWithSuccess();
+                        }
+                    } catch (e) {
+                        console.error("Error in wait-notifier listener", e);
+                    }
+                })();
+            });
+
             const timeoutId = setTimeout(() => {
                 finishWithTimeout();
             }, TIMEOUT_MS);
@@ -301,9 +323,16 @@ tokenRouter.on(
             }, POLL_INTERVAL_MS);
 
             const cleanup = () => {
+                if (finished) return;
+                finished = true;
+
                 clearTimeout(timeoutId as unknown as number);
                 clearInterval(pollIntervalId as unknown as number);
-                if (removeWaiter) removeWaiter();
+                removeWaiter();
+
+                if (c.req.raw.signal) {
+                    c.req.raw.signal.removeEventListener("abort", onAbort);
+                }
             };
 
             const finishWithSuccess = () => {
@@ -321,34 +350,14 @@ tokenRouter.on(
                 );
             };
 
-            // 1. Setup in-isolate module-level Map for instant notification
-            let removeWaiter: (() => void) | undefined; // oxlint-disable-line prefer-const
-            removeWaiter = addWaiter(repo, agentId, () => {
-                void (async () => {
-                    try {
-                        // Double check with KV to be sure
-                        const currentScopes =
-                            await tokenService.findConsentScopes(
-                                agentId,
-                                repo,
-                                scopes
-                            );
-                        if (currentScopes) {
-                            finishWithSuccess();
-                        }
-                    } catch (e) {
-                        console.error("Error in wait-notifier listener", e);
-                    }
-                })();
-            });
+            const onAbort = () => {
+                cleanup();
+                resolve(new Response(null, { status: 499 }));
+            };
 
             // Cloudflare Workers specific: Ensure the promise resolves if the client disconnects
             if (c.req.raw.signal) {
-                c.req.raw.signal.addEventListener("abort", () => {
-                    cleanup();
-                    // Resolving with a dummy response, the client already disconnected
-                    resolve(new Response(null, { status: 499 }));
-                });
+                c.req.raw.signal.addEventListener("abort", onAbort);
             }
         });
     }
