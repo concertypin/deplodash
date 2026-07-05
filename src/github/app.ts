@@ -50,10 +50,13 @@ export class GitHubApp {
     private keyPromise: Promise<CryptoKey> | null = null;
     /** Cached installation ID per owner (in-memory, per-request). */
     private installationCache: Map<string, string> = new Map();
+    /** KV namespace for cross-isolate caching of installation IDs and repo existence. */
+    private readonly kv: KVNamespace | undefined;
 
-    constructor(appId: string, privateKeyPem: string) {
+    constructor(appId: string, privateKeyPem: string, kv?: KVNamespace) {
         this.appId = appId;
         this.privateKeyPem = privateKeyPem;
+        this.kv = kv;
     }
 
     /**
@@ -88,6 +91,20 @@ export class GitHubApp {
     async resolveInstallationId(owner: string): Promise<string> {
         const cached = this.installationCache.get(owner);
         if (cached) return cached;
+
+        // Check KV cache before hitting GitHub API
+        const cacheKey = `installation_id::${owner}`;
+        if (this.kv) {
+            try {
+                const kvCached = await this.kv.get(cacheKey);
+                if (kvCached) {
+                    this.installationCache.set(owner, kvCached);
+                    return kvCached;
+                }
+            } catch {
+                // KV unavailable — proceed with GitHub API
+            }
+        }
 
         const jwt = await this.getJwt();
         const headers = {
@@ -136,6 +153,16 @@ export class GitHubApp {
         }
 
         this.installationCache.set(owner, installationId);
+        // Cache in KV for cross-isolate reuse (30 day TTL)
+        if (this.kv) {
+            try {
+                await this.kv.put(cacheKey, installationId, {
+                    expirationTtl: 86400 * 7,
+                });
+            } catch {
+                // KV write failure is non-fatal
+            }
+        }
         return installationId;
     }
 
@@ -198,6 +225,17 @@ export class GitHubApp {
      * GitHub App installation's admin permissions.
      */
     async ensureRepoExists(owner: string, repo: string): Promise<boolean> {
+        // Check KV cache first
+        const cacheKey = `repo_exists::${owner}/${repo}`;
+        if (this.kv) {
+            try {
+                const exists = await this.kv.get(cacheKey);
+                if (exists === "1") return true;
+            } catch {
+                // KV unavailable — proceed with GitHub API
+            }
+        }
+
         const installationId = await this.resolveInstallationId(owner);
         const adminToken = await this.getInstallationToken(
             { administration: "write" },
@@ -213,7 +251,19 @@ export class GitHubApp {
                 },
             }
         );
-        if (checkRes.status === 200) return true;
+        if (checkRes.status === 200) {
+            // Cache existence in KV (7 day TTL)
+            if (this.kv) {
+                try {
+                    await this.kv.put(cacheKey, "1", {
+                        expirationTtl: 86400 * 7,
+                    });
+                } catch {
+                    // KV write failure is non-fatal
+                }
+            }
+            return true;
+        }
         if (checkRes.status !== 404) {
             throw new Error(
                 `Failed to check repo existence: ${checkRes.status}`
@@ -253,6 +303,14 @@ export class GitHubApp {
             );
         }
 
+        // Cache newly created repo (7 day TTL)
+        if (this.kv) {
+            try {
+                await this.kv.put(cacheKey, "1", { expirationTtl: 86400 * 7 });
+            } catch {
+                // KV write failure is non-fatal
+            }
+        }
         return true;
     }
 }

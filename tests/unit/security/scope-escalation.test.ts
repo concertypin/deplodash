@@ -51,6 +51,21 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
             .use("*", sessionMiddleware())
             .route("/auth", consentRouter);
 
+        // First GET to obtain a valid encrypted payload scoped to "contents:read"
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        expect(encMatch).not.toBeNull();
+        const encryptedValue = encMatch![1]!;
+
+        // Attempt to approve "admin" when original request was "contents:read"
         const resp = await app.fetch(
             new Request("http://localhost/auth/consent", {
                 method: "POST",
@@ -60,7 +75,8 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "admin",
-                    requested_scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encryptedValue,
                 }),
             }),
             authEnv

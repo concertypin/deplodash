@@ -40,10 +40,13 @@ describe("GET /auth/consent", () => {
 });
 
 describe("GET /auth/github", () => {
-    const app = new Hono<HonoEnv>().route("/auth", authRouter);
-    const client = testClient(app, BASE_ENV);
+    beforeEach(() => {
+        resetKeyCache();
+    });
 
     it("redirects to GitHub OAuth authorization URL with proper params", async () => {
+        const app = new Hono<HonoEnv>().route("/auth", authRouter);
+        const client = testClient(app, BASE_ENV);
         const resp = await client.auth.github.$get({ query: {} });
         expect(resp.status).toBe(302);
         const location = resp.headers.get("Location");
@@ -53,11 +56,50 @@ describe("GET /auth/github", () => {
     });
 
     it("includes next parameter when provided", async () => {
+        const app = new Hono<HonoEnv>().route("/auth", authRouter);
+        const client = testClient(app, BASE_ENV);
         const resp = await client.auth.github.$get({
             query: { next: "/custom" },
         });
         expect(resp.status).toBe(302);
         const location = resp.headers.get("Location");
         expect(location).toContain("https://github.com/login/oauth/authorize");
+    });
+
+    it("reflects request origin as redirect_uri for localhost", async () => {
+        const app = new Hono<HonoEnv>().route("/auth", authRouter);
+        const client = testClient(app, BASE_ENV);
+        const resp = await client.auth.github.$get({ query: {} });
+        expect(resp.status).toBe(302);
+        const location = resp.headers.get("Location") || "";
+        const params = new URL(location).searchParams;
+        // testClient uses raw fetch, so hostname is localhost without port
+        expect(params.get("redirect_uri")).toBe("http://localhost/callback");
+    });
+
+    it("uses CALLBACK_URL for non-localhost requests", async () => {
+        const app = new Hono<HonoEnv>().route("/auth", authRouter);
+        const resp = await app.fetch(
+            new Request("https://deplodash.condev.workers.dev/auth/github"),
+            BASE_ENV
+        );
+        expect(resp.status).toBe(302);
+        const location = resp.headers.get("Location") || "";
+        const params = new URL(location).searchParams;
+        expect(params.get("redirect_uri")).toBe(BASE_ENV.CALLBACK_URL);
+    });
+
+    it("embeds r field in state payload for redirect_uri binding", async () => {
+        const app = new Hono<HonoEnv>().route("/auth", authRouter);
+        const resp = await app.fetch(
+            new Request("http://localhost:9001/auth/github"),
+            BASE_ENV
+        );
+        expect(resp.status).toBe(302);
+        const location = resp.headers.get("Location") || "";
+        const params = new URL(location).searchParams;
+        const encryptedState = params.get("state") || "";
+        // State should be a non-empty encrypted token starting with k1.
+        expect(encryptedState).toMatch(/^k1\./);
     });
 });

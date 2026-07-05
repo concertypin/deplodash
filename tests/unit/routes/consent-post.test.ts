@@ -42,29 +42,58 @@ describe("POST /auth/consent", () => {
         vi.unstubAllGlobals();
     });
 
-    it("records consent and shows success page", async () => {
+    /** Helper: POST /auth/consent within a fresh app, after fetching a valid encrypted payload via GET. */
+    async function consentPost(
+        body: Record<string, string>,
+        overrides?: Partial<HonoEnv["Bindings"]>
+    ): Promise<Response> {
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,
             GITHUB_TOKEN: "ghp_test_user_token",
+            ...overrides,
         };
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/auth", consentRouter);
-        const resp = await app.fetch(
+
+        // First GET /consent to obtain a valid encrypted payload
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        const encryptedValue = encMatch
+            ? encMatch[1]
+            : "fallback.encrypted.value";
+
+        return app.fetch(
             new Request("http://localhost/auth/consent", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
                 body: new URLSearchParams({
-                    repo: "owner/repo",
-                    scopes: "contents:read",
-                    requested_scopes: "contents:read",
-                    agent_id: "test-agent",
+                    ...body,
+                    ...(body.requested_scopes_enc === undefined
+                        ? { requested_scopes_enc: encryptedValue }
+                        : {}),
                 }),
             }),
             authEnv
         );
+    }
+
+    it("records consent and shows success page", async () => {
+        const resp = await consentPost({
+            repo: "owner/repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+        });
         expect(resp.status).toBe(200);
         const text = await resp.text();
         expect(text).toContain("Consent");
@@ -80,27 +109,11 @@ describe("POST /auth/consent", () => {
         vi.spyOn(TokenService.prototype, "recordConsent").mockRejectedValue(
             new Error("KV write failed")
         );
-        const authEnv: HonoEnv["Bindings"] = {
-            ...BASE_ENV,
-            GITHUB_TOKEN: "ghp_test_user_token",
-        };
-        const app = new Hono<HonoEnv>()
-            .use("*", sessionMiddleware())
-            .route("/auth", consentRouter);
-        const resp = await app.fetch(
-            new Request("http://localhost/auth/consent", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                    repo: "owner/repo",
-                    scopes: "contents:read",
-                    requested_scopes: "contents:read",
-                }),
-            }),
-            authEnv
-        );
+        const resp = await consentPost({
+            repo: "owner/repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+        });
         expect(resp.status).toBe(400);
         const text = await resp.text();
         expect(text).toContain("Failed to record consent");
@@ -128,6 +141,20 @@ describe("POST /auth/consent", () => {
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/auth", consentRouter);
+
+        // GET a valid encrypted payload first
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        const encryptedValue = encMatch![1]!;
+
         const resp = await app.fetch(
             new Request("http://localhost/auth/consent", {
                 method: "POST",
@@ -137,7 +164,8 @@ describe("POST /auth/consent", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "admin",
-                    requested_scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encryptedValue,
                 }),
             }),
             authEnv
@@ -157,6 +185,20 @@ describe("POST /auth/consent", () => {
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/auth", consentRouter);
+
+        // GET a valid encrypted payload first
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=bogus:scope&agent_id=test-agent"
+            ),
+            authEnv
+        );
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        const encryptedValue = encMatch![1]!;
+
         const resp = await app.fetch(
             new Request("http://localhost/auth/consent", {
                 method: "POST",
@@ -166,7 +208,8 @@ describe("POST /auth/consent", () => {
                 body: new URLSearchParams({
                     repo: "owner/repo",
                     scopes: "bogus:scope",
-                    requested_scopes: "bogus:scope",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encryptedValue,
                 }),
             }),
             authEnv

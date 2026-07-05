@@ -69,12 +69,11 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                                 JSON.stringify(newSession)
                             );
 
-                            const isHttps = c.req.url.startsWith("https://");
                             setCookie(c, COOKIE_NAME, encrypted, {
                                 path: "/",
                                 httpOnly: true,
                                 sameSite: "Strict",
-                                secure: isHttps,
+                                secure: true,
                                 maxAge: MAX_AGE_SECS,
                             });
 

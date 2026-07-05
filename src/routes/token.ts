@@ -15,6 +15,7 @@ import { validator, describeRoute, resolver } from "hono-openapi";
 import * as z from "zod";
 import type { HonoEnv } from "@/types";
 import { agentAuthMiddleware } from "@/middleware/agent-auth";
+import { bodyLimit } from "hono/body-limit";
 import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
@@ -22,7 +23,12 @@ import { addWaiter } from "@/token/wait-notifier";
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const requestTokenSchema = z.object({
-    repo: z.templateLiteral([z.string(), z.literal("/"), z.string()]),
+    repo: z
+        .string()
+        .regex(
+            /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
+            "Invalid repository format"
+        ),
     scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
 });
 
@@ -119,7 +125,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
         }
 
         try {
-            const gh = new GitHubApp(appId, privateKey);
+            const gh = new GitHubApp(appId, privateKey, c.env.KV);
             const [owner, name] = repo.split("/") as [string, string];
             const tokenService = new TokenService(c.env.KV);
             const agentId = c.get("agent_id")!;
@@ -218,6 +224,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
         }
     }
 );
+tokenRouter.use("/token", bodyLimit({ maxSize: 50 * 1024 }));
 
 tokenRouter.on(
     "QUERY",
@@ -261,6 +268,23 @@ tokenRouter.on(
     async (c) => {
         const { repo, scopes } = c.req.valid("json");
         const agentId = c.get("agent_id")!;
+        // Rate limiting — per-agent throttle
+        const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+        if (rateLimiter) {
+            try {
+                const { success } = await rateLimiter.limit({
+                    key: agentId,
+                });
+                if (!success) {
+                    return c.json(
+                        { error: "Rate limited. Try again later." },
+                        429
+                    );
+                }
+            } catch {
+                // Rate limiter unavailable (e.g., local dev) — proceed
+            }
+        }
         const tokenService = new TokenService(c.env.KV);
 
         // First check if consent is already granted

@@ -141,6 +141,52 @@ describe("GET /callback", () => {
         expect(setCookie).toContain("Max-Age=");
     });
 
+    it("uses r field from state payload as redirect_uri in code exchange", async () => {
+        const mockFetch = vi.fn<() => Promise<Response>>().mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    access_token: "gho_r_field_token",
+                    token_type: "bearer",
+                    scope: "repo",
+                    expires_in: 28800,
+                    refresh_token: "ghr_r_field",
+                    refresh_token_expires_in: 15811200,
+                }),
+                { headers: { "Content-Type": "application/json" } }
+            )
+        );
+        vi.stubGlobal("fetch", mockFetch);
+
+        const key = await getOrInitKey(TEST_SECRET);
+        const encrypted = await encryptWith(
+            key,
+            JSON.stringify({
+                v: "verifier",
+                n: "/done",
+                r: "http://localhost:5178/callback",
+            })
+        );
+        const resp = await client.callback.$get({
+            query: { code: "code", state: encrypted },
+        });
+
+        expect(resp.status).toBe(302);
+
+        // Verify the fetch call to GitHub used the r field as redirect_uri
+        const fetchCall = (
+            mockFetch.mock.calls as unknown as Array<
+                [string, { body?: string }]
+            >
+        ).find(
+            ([url]) => url === "https://github.com/login/oauth/access_token"
+        );
+        expect(fetchCall).toBeDefined();
+        const fetchInit = fetchCall![1];
+        const parsed: unknown = JSON.parse(fetchInit.body!);
+        const body = parsed as { redirect_uri: string };
+        expect(body.redirect_uri).toBe("http://localhost:5178/callback");
+    });
+
     it("protects against open redirect via state payload", async () => {
         const mockFetch = vi.fn<() => Promise<Response>>().mockResolvedValue(
             new Response(
