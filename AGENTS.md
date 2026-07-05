@@ -95,7 +95,7 @@ Configuration is in `wrangler.jsonc`.
 
 - **CDN dependencies** — Views (TSX components in `src/views/`) load DaisyUI, Tailwind, and Lucide from external CDNs with `unsafe-inline` script-src. Should be bundled/inlined before production.
 - **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop for admin tools.
-- **OpenAPI spec incomplete** — `POST /api/token`, `POST /auth/consent` and auth endpoints lack proper OpenAPI response schemas. See `TODO.md`.
+- **OpenAPI spec incomplete** — `POST /api/token`, `QUERY /api/wait`, `POST /auth/consent` and auth endpoints lack proper OpenAPI response schemas. See `TODO.md`.
 - **Agent token management** — No admin UI or API to register/revoke agent tokens. Currently must be done via direct KV writes or wrangler.
 - **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` batches KV gets (50 at a time) for performance but still does not handle `kv.list()` cursor-based pagination. At most 1000 consent records returned per page.
 - **`github-app.ts` `resolveInstallationId`** — Does not cache installation IDs across requests. Each request to a different owner triggers a fresh GitHub API call. Consider adding KV-based caching with TTL.

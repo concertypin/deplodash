@@ -68,9 +68,10 @@ sequenceDiagram
 
 1. **Agent** sends `POST /api/token` with a pre-provisioned Bearer token, repo, and scope
 2. **Deplodash** checks consent in KV → if not yet approved, returns a consent URL
-3. **User** visits the consent URL, logs in via OAuth, and approves access
-4. **Agent** retries, gets a scoped GitHub Installation Token (repo is auto-created if missing)
-5. **Agent** uses the token for `git push` or GitHub API calls
+3. **Agent** can optionally wait for consent using the Long Polling endpoint `QUERY /api/wait`
+4. **User** visits the consent URL, logs in via OAuth, and approves access
+5. **Agent** gets notified (or retries `POST /api/token`), gets a scoped GitHub Installation Token (repo is auto-created if missing)
+6. **Agent** uses the token for `git push` or GitHub API calls
 
 ## API
 
