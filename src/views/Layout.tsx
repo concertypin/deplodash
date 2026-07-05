@@ -28,9 +28,19 @@ export const Layout: FC<LayoutProps> = ({ title, children }) => (
             <link
                 href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css"
                 rel="stylesheet"
+                integrity="sha384-hlhTcK8D1Pj0594UWVQ6V40KGnB4Y8+Pf6mov3DVLV2lr0PqHuq/x1lVg/hZn7jt"
+                crossorigin="anonymous"
             />
-            <script src="https://cdn.tailwindcss.com" />
-            <script src="https://unpkg.com/lucide@0.428.0/dist/umd/lucide.min.js" />
+            <script
+                src="https://cdn.tailwindcss.com"
+                integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K"
+                crossorigin="anonymous"
+            />
+            <script
+                src="https://unpkg.com/lucide@0.428.0/dist/umd/lucide.min.js"
+                integrity="sha384-c4W8Fm5eAFkR+fiwPvJ1sXKBeXCtwThNMMceQyANSRz0w5ilnJFrNESyvcx/UJII"
+                crossorigin="anonymous"
+            />
         </head>
         <body>
             {children}

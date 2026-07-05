@@ -102,6 +102,22 @@ describe("Consent scope validation (concurrent-safe)", () => {
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/auth", consentRouter);
+        // First GET /consent to obtain a valid encrypted payload
+        const getResp = await app.fetch(
+            new Request(
+                "http://localhost/auth/consent?repo=owner/repo&scopes=contents:read&agent_id=test-agent"
+            ),
+            CONCURRENT_ENV
+        );
+        expect(getResp.status).toBe(200);
+        const getText = await getResp.text();
+        const encMatch = getText.match(
+            /name="requested_scopes_enc" value="([^"]+)"/
+        );
+        expect(encMatch).not.toBeNull();
+        const encryptedValue = encMatch![1]!;
+
+        // Now POST with a valid encrypted payload but no scopes selected (no scopes field)
         const resp = await app.fetch(
             new Request("http://localhost/auth/consent", {
                 method: "POST",
@@ -110,7 +126,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                 },
                 body: new URLSearchParams({
                     repo: "owner/repo",
-                    requested_scopes: "contents:read",
+                    requested_scopes_enc: encryptedValue,
                     agent_id: "test-agent",
                 }),
             }),

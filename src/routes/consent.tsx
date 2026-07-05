@@ -83,7 +83,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 scopes: z.union([z.string(), z.array(z.string())]).optional(),
                 requested_scopes: z.string().optional(),
                 requested_scopes_enc: z.string().optional(),
-                agent_id: z.string().optional(),
+                agent_id: z.string().min(1).optional(),
             })
         ),
         async (c) => {
@@ -94,12 +94,27 @@ export const consentRouter = new Hono<HonoEnv>()
                 requested_scopes_enc,
                 agent_id,
             } = c.req.valid("form");
+            // CSRF protection — validate Origin header
+            const origin = c.req.header("Origin");
+            if (origin && origin !== new URL(c.req.url).origin) {
+                return c.text("CSRF detected", 403);
+            }
             // Validate authenticated consent context.
             // If encrypted data is provided, decrypt and verify repo+agent_id match.
             // When ENCRYPTION_SECRET is configured but no encrypted field is submitted,
             // the request is rejected (prevents subset-validation bypass).
             let requested_scopes = rawRequestedScopes;
-            if (requested_scopes_enc) {
+            if (c.env.ENCRYPTION_SECRET) {
+                if (!requested_scopes_enc) {
+                    const html = renderPage(
+                        <ConsentPage
+                            repo={repo}
+                            scopes={rawScopes?.toString() ?? ""}
+                            error="Invalid consent request. Missing encrypted payload."
+                        />
+                    );
+                    return c.html(html, 400);
+                }
                 try {
                     const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
                     const decrypted = await decryptWith(
@@ -125,26 +140,28 @@ export const consentRouter = new Hono<HonoEnv>()
                     const html = renderPage(
                         <ConsentPage
                             repo={repo}
-                            scopes=""
+                            scopes={rawScopes?.toString() ?? ""}
                             error="Invalid consent request. Please try again from the agent's link."
                         />
                     );
                     return c.html(html, 400);
                 }
-            } else if (!rawRequestedScopes && c.env.ENCRYPTION_SECRET) {
-                // Both encrypted field AND plaintext scope info are absent.
-                // Without at least one, subset validation is skipped entirely,
-                // opening a bypass — reject.
-                const html = renderPage(
-                    <ConsentPage
-                        repo={repo}
-                        scopes=""
-                        error="Invalid consent request. Please try again from the agent's link."
-                    />
-                );
-                return c.html(html, 400);
             }
             const tokenService = new TokenService(c.env.KV);
+            // Rate limiting — per-IP throttle for consent endpoints
+            const consentRateLimiter = c.env.TOKEN_RATE_LIMITER;
+            if (consentRateLimiter) {
+                try {
+                    const { success } = await consentRateLimiter.limit({
+                        key: c.req.header("CF-Connecting-IP") || "unknown",
+                    });
+                    if (!success) {
+                        return c.text("Rate limited. Try again later.", 429);
+                    }
+                } catch {
+                    // Rate limiter unavailable (e.g., local dev) — proceed
+                }
+            }
             try {
                 // Handle empty scopes — no checkboxes were checked
                 if (!rawScopes) {
@@ -272,11 +289,30 @@ export const consentRouter = new Hono<HonoEnv>()
             z.object({
                 repo: z.string().min(1),
                 scopes: z.string().min(1),
-                agent_id: z.string().optional(),
+                agent_id: z.string().min(1).optional(),
             })
         ),
         async (c) => {
             const { repo, scopes, agent_id } = c.req.valid("form");
+            // CSRF protection — validate Origin header
+            const origin = c.req.header("Origin");
+            if (origin && origin !== new URL(c.req.url).origin) {
+                return c.text("CSRF detected", 403);
+            }
+            // Rate limiting — per-IP throttle for consent endpoints
+            const revokeRateLimiter = c.env.TOKEN_RATE_LIMITER;
+            if (revokeRateLimiter) {
+                try {
+                    const { success } = await revokeRateLimiter.limit({
+                        key: c.req.header("CF-Connecting-IP") || "unknown",
+                    });
+                    if (!success) {
+                        return c.text("Rate limited. Try again later.", 429);
+                    }
+                } catch {
+                    // Rate limiter unavailable (e.g., local dev) — proceed
+                }
+            }
             const client = c.get("client")!;
             const tokenService = new TokenService(c.env.KV);
             try {

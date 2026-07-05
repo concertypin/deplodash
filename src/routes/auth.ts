@@ -23,15 +23,42 @@ export const authRouter = new Hono<HonoEnv>().get(
         })
     ),
     async (c) => {
+        // Rate limiting — per-IP throttle for auth endpoints
+        const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+        if (rateLimiter) {
+            try {
+                const { success } = await rateLimiter.limit({
+                    key: c.req.header("CF-Connecting-IP") || "unknown",
+                });
+                if (!success) {
+                    return c.text("Rate limited. Try again later.", 429);
+                }
+            } catch {
+                // Rate limiter unavailable (e.g., local dev) — proceed
+            }
+        }
         const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
         const verifier = randomBytes(32);
         const challenge = await pkceChallenge(verifier);
 
         const next = c.req.valid("query").next;
-        const statePayload = JSON.stringify({ v: verifier, n: next });
-        const encryptedState = await encryptWith(key, statePayload);
 
-        const redirectUri = c.req.query("redirect_uri") || c.env.CALLBACK_URL;
+        // Detect local dev — reflect the request origin as redirect_uri.
+        // c.req.url is the actual URL the request reached, so it can't be spoofed.
+        // Production always uses CALLBACK_URL from env to prevent open redirect attacks.
+        const reqUrl = new URL(c.req.url);
+        const isLocal =
+            reqUrl.hostname === "localhost" || reqUrl.hostname === "127.0.0.1";
+        const redirectUri = isLocal
+            ? `${reqUrl.origin}/callback`
+            : c.env.CALLBACK_URL;
+
+        const statePayload = JSON.stringify({
+            v: verifier,
+            n: next,
+            r: redirectUri,
+        });
+        const encryptedState = await encryptWith(key, statePayload);
         const params = new URLSearchParams({
             client_id: c.env.GITHUB_CLIENT_ID,
             redirect_uri: redirectUri,

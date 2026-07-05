@@ -3,7 +3,6 @@ import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { consentRouter } from "@/routes/consent";
 import { sessionMiddleware } from "@/middleware";
-import { TokenService } from "@/token/service";
 import { env } from "cloudflare:workers";
 
 const BASE_ENV: HonoEnv["Bindings"] = {
@@ -39,7 +38,7 @@ describe("Encrypted consent field omission (KV required)", () => {
         vi.unstubAllGlobals();
     });
 
-    it("omitting encrypted field allows repo/agent_id injection", async () => {
+    it("omitting encrypted field is rejected when ENCRYPTION_SECRET is configured", async () => {
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,
             GITHUB_TOKEN: "ghp_test_user_token",
@@ -63,15 +62,10 @@ describe("Encrypted consent field omission (KV required)", () => {
             }),
             authEnv
         );
-        expect(resp.status).toBe(200);
+        expect(resp.status).toBe(400);
         const text = await resp.text();
-        expect(text).toContain("Consent");
-
-        const tokenService = new TokenService(env.KV);
-        expect(
-            await tokenService.checkConsent("injected-agent", "injected/repo", [
-                "contents:read",
-            ])
-        ).toBe(true);
+        expect(text).toContain(
+            "Invalid consent request. Missing encrypted payload."
+        );
     });
 });

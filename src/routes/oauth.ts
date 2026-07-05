@@ -19,6 +19,20 @@ const statePayloadSchema = z.object({
 
 export const oauthRouter = new Hono<HonoEnv>()
     .get("/callback", async (c) => {
+        // Rate limiting — per-IP throttle for OAuth callback
+        const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+        if (rateLimiter) {
+            try {
+                const { success } = await rateLimiter.limit({
+                    key: c.req.header("CF-Connecting-IP") || "unknown",
+                });
+                if (!success) {
+                    return c.text("Rate limited. Try again later.", 429);
+                }
+            } catch {
+                // Rate limiter unavailable (e.g., local dev) — proceed
+            }
+        }
         const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
         const code = c.req.query("code");
         const state = c.req.query("state");
@@ -61,12 +75,11 @@ export const oauthRouter = new Hono<HonoEnv>()
             const next = isSafeRedirect(payload.n || "/")
                 ? (payload.n ?? "/")
                 : "/";
-            const isHttps = c.req.url.startsWith("https://");
             setCookie(c, COOKIE_NAME, encryptedSession, {
                 path: "/",
                 httpOnly: true,
                 sameSite: "Strict",
-                secure: isHttps,
+                secure: true,
                 maxAge: MAX_AGE_SECS,
             });
             return c.redirect(next);
@@ -75,7 +88,11 @@ export const oauthRouter = new Hono<HonoEnv>()
                 return c.redirect("/auth/github");
             }
             const msg = err instanceof Error ? err.message : String(err);
-            return c.text(`OAuth failed: ${msg}`, 400);
+            const encryptedMessage = await encryptWith(key, msg);
+            return c.text(
+                `OAuth failed. Debug token: ${encryptedMessage}`,
+                400
+            );
         }
     })
     .get("/logout", (c) => {
