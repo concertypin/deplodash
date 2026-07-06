@@ -158,11 +158,7 @@ export const consentRouter = new Hono<HonoEnv>()
                     );
                     if (decrypted === null) throw new Error("Decrypt failed");
 
-                    const ctx = zSchema.parse(JSON.parse(decrypted)) as {
-                        scopes: string;
-                        repo?: string;
-                        agent_id?: string;
-                    };
+                    const ctx = zSchema.parse(JSON.parse(decrypted));
                     // Verify repo binding — prevents cross-repo replay
                     if (ctx.repo && ctx.repo !== repo) {
                         throw new Error("Repo mismatch");

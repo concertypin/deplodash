@@ -106,6 +106,22 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     },
                 },
             },
+            429: {
+                description: "Rate limited. Try again later.",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            500: {
+                description: "Internal server error",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
         },
     }),
     validator("json", requestTokenSchema),
@@ -253,6 +269,14 @@ const waitDescription = describeRoute({
         },
         401: {
             description: "Invalid or missing agent token",
+            content: {
+                "application/json": {
+                    schema: resolver(errorResponseSchema),
+                },
+            },
+        },
+        429: {
+            description: "Rate limited. Try again later.",
             content: {
                 "application/json": {
                     schema: resolver(errorResponseSchema),

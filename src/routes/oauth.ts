@@ -36,6 +36,29 @@ export const oauthRouter = new Hono<HonoEnv>()
                         "text/plain": {
                             schema: { type: "string" },
                         },
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                properties: {
+                                    success: { const: false },
+                                    error: {
+                                        type: "array",
+                                        items: {
+                                            type: "object",
+                                            properties: {
+                                                path: {
+                                                    type: "array",
+                                                    items: { type: "string" },
+                                                },
+                                                message: { type: "string" },
+                                                code: { type: "string" },
+                                            },
+                                        },
+                                    },
+                                    data: { type: "object" },
+                                },
+                            },
+                        },
                     },
                 },
                 429: {
