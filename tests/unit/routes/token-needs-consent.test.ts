@@ -6,8 +6,8 @@ import { tokenRouter } from "@/routes/token";
 import { resetKeyCache } from "@/crypto";
 import { env } from "cloudflare:workers";
 import { registerAgentToken } from "@/middleware/agent-auth";
-
-const BASE_ENV: HonoEnv["Bindings"] = {
+import { needsConsentResponseSchema } from "@/routes/token";
+const BASE_ENV = {
     ENCRYPTION_SECRET: "test-secret-1234567890123456",
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
@@ -17,7 +17,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
-};
+} satisfies HonoEnv["Bindings"];
 
 beforeEach(() => {
     resetKeyCache();
@@ -42,7 +42,7 @@ describe("POST /api/token (authenticated, needs consent)", () => {
             { headers: { Authorization: "Bearer test-agent-token" } }
         );
         expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = needsConsentResponseSchema.parse(await resp.json());
         expect(body.status).toBe("needs_consent");
     });
 });

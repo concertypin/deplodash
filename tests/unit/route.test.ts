@@ -6,6 +6,20 @@ import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { resetKeyCache } from "@/crypto";
 import { env } from "cloudflare:workers";
+import { z } from "zod";
+
+const validatorErrorSchema = z.object({
+    success: z.literal(false),
+    error: z.array(
+        z.object({
+            code: z.string(),
+            expected: z.string().optional(),
+            path: z.array(z.string()),
+            message: z.string(),
+        })
+    ),
+    data: z.record(z.string(), z.unknown()),
+});
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -66,17 +80,24 @@ describe("route.ts - GET / (unauthenticated)", () => {
 
 describe("route.ts - GET /callback", () => {
     it("returns 400 when code and state are missing", async () => {
-        const resp = await client.callback.$get();
+        const resp = await client.callback.$get({
+            query: { code: "", state: "" },
+        });
         expect(resp.status).toBe(400);
-        expect(await resp.text()).toContain("Missing code or state");
+        const body = validatorErrorSchema.parse(await resp.json());
+        expect(body.success).toBe(false);
+        expect(body.error.some((e) => e.path.includes("code"))).toBe(true);
+        expect(body.error.some((e) => e.path.includes("state"))).toBe(true);
     });
 
     it("returns 400 when state is missing", async () => {
         const resp = await client.callback.$get({
-            query: { code: "testcode" },
+            query: { code: "testcode", state: "" },
         });
         expect(resp.status).toBe(400);
-        expect(await resp.text()).toContain("Missing code or state");
+        const body = validatorErrorSchema.parse(await resp.json());
+        expect(body.success).toBe(false);
+        expect(body.error.some((e) => e.path.includes("state"))).toBe(true);
     });
 });
 

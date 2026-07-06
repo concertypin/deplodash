@@ -11,6 +11,31 @@ import type { HonoEnv } from "@/types";
 import { sessionMiddleware } from "@/middleware";
 import { listAgentTokens, revokeAgentToken } from "@/middleware/agent-auth";
 import { GitHubClient } from "@/github";
+import { validator, describeRoute, resolver } from "hono-openapi";
+import * as z from "zod";
+
+const errorResponseSchema = z.object({
+    error: z.string(),
+});
+
+const agentListResponseSchema = z.object({
+    status: z.literal("ok"),
+    tokens: z.array(
+        z.object({
+            agent_id: z.string(),
+            label: z.string(),
+            created_at: z.number(),
+        })
+    ),
+});
+
+const revokeAgentTokenSchema = z.object({
+    token: z.string().min(1),
+});
+
+const revokeResponseSchema = z.object({
+    status: z.literal("ok"),
+});
 
 function isAdminUser(login: string, adminUsers: string | undefined): boolean {
     if (!adminUsers) return false;
@@ -29,68 +54,142 @@ adminRouter.use("*", sessionMiddleware());
  * GET /api/admin/agent/list
  * Returns all registered agent tokens (metadata only, no raw tokens).
  */
-adminRouter.get("/agent/list", async (c) => {
-    const ghToken = c.get("gh_token");
-    if (!ghToken) {
-        return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    // Check admin authorization
-    try {
-        const ghClient = new GitHubClient(ghToken);
-        const user = await ghClient.getUser();
-        if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
-            return c.json({ error: "Forbidden" }, 403);
+adminRouter.get(
+    "/agent/list",
+    describeRoute({
+        description:
+            "Returns all registered agent tokens (metadata only, no raw tokens).",
+        responses: {
+            200: {
+                description: "Success",
+                content: {
+                    "application/json": {
+                        schema: resolver(agentListResponseSchema),
+                    },
+                },
+            },
+            401: {
+                description: "Not authenticated",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            403: {
+                description: "Forbidden",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+        },
+    }),
+    async (c) => {
+        const ghToken = c.get("gh_token");
+        if (!ghToken) {
+            return c.json({ error: "Not authenticated" }, 401);
         }
-    } catch {
-        return c.json({ error: "Failed to verify admin access" }, 403);
-    }
 
-    const tokens = await listAgentTokens(c.env.KV);
-    return c.json({
-        status: "ok",
-        tokens: tokens.map((t) => ({
-            agent_id: t.info.agent_id,
-            label: t.info.label,
-            created_at: t.info.created_at,
-        })),
-    });
-});
+        // Check admin authorization
+        try {
+            const ghClient = new GitHubClient(ghToken);
+            const user = await ghClient.getUser();
+            if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
+                return c.json({ error: "Forbidden" }, 403);
+            }
+        } catch {
+            return c.json({ error: "Failed to verify admin access" }, 403);
+        }
+
+        const tokens = await listAgentTokens(c.env.KV);
+        return c.json({
+            status: "ok",
+            tokens: tokens.map((t) => ({
+                agent_id: t.info.agent_id,
+                label: t.info.label,
+                created_at: t.info.created_at,
+            })),
+        });
+    }
+);
 
 /**
  * POST /api/admin/agent/revoke
  * Revoke an agent token.
- * Body: { token: string }
  */
-adminRouter.post("/agent/revoke", async (c) => {
-    const ghToken = c.get("gh_token");
-    if (!ghToken) {
-        return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    // Check admin authorization
-    try {
-        const ghClient = new GitHubClient(ghToken);
-        const user = await ghClient.getUser();
-        if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
-            return c.json({ error: "Forbidden" }, 403);
+adminRouter.post(
+    "/agent/revoke",
+    describeRoute({
+        description: "Revoke an agent token.",
+        responses: {
+            200: {
+                description: "Success",
+                content: {
+                    "application/json": {
+                        schema: resolver(revokeResponseSchema),
+                    },
+                },
+            },
+            400: {
+                description: "Bad request",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            401: {
+                description: "Not authenticated",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            403: {
+                description: "Forbidden",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+        },
+    }),
+    async (c, next) => {
+        try {
+            await c.req.json();
+        } catch {
+            return c.json({ error: "Invalid JSON body" }, 400);
         }
-    } catch {
-        return c.json({ error: "Failed to verify admin access" }, 403);
-    }
+        await next();
+    },
+    validator("json", revokeAgentTokenSchema, (result, c) => {
+        if (!result.success) {
+            return c.json({ error: "Missing or invalid 'token' field" }, 400);
+        }
+    }),
+    async (c) => {
+        const ghToken = c.get("gh_token");
+        if (!ghToken) {
+            return c.json({ error: "Not authenticated" }, 401);
+        }
 
-    let body: { token?: string };
-    try {
-        body = await c.req.json();
-    } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-    }
+        // Check admin authorization
+        try {
+            const ghClient = new GitHubClient(ghToken);
+            const user = await ghClient.getUser();
+            if (!isAdminUser(user.login, c.env.GITHUB_ADMIN_USERS)) {
+                return c.json({ error: "Forbidden" }, 403);
+            }
+        } catch {
+            return c.json({ error: "Failed to verify admin access" }, 403);
+        }
 
-    const token = body?.token;
-    if (!token || typeof token !== "string" || token.length === 0) {
-        return c.json({ error: "Missing or invalid 'token' field" }, 400);
+        const { token } = c.req.valid("json");
+        await revokeAgentToken(c.env.KV, token);
+        return c.json({ status: "ok" });
     }
-
-    await revokeAgentToken(c.env.KV, token);
-    return c.json({ status: "ok" });
-});
+);

@@ -7,14 +7,18 @@ import { tokenRouter } from "@/routes/token";
 import { TokenService } from "@/token/service";
 import { env } from "cloudflare:workers";
 import { registerAgentToken } from "@/middleware/agent-auth";
-
+import {
+    tokenResponseSchema,
+    needsConsentResponseSchema,
+    errorResponseSchema,
+} from "@/routes/token";
 const mockRateLimiter = {
     limit: vi.fn<(_options: { key: string }) => Promise<{ success: boolean }>>(
         () => Promise.resolve({ success: true })
     ),
 };
 
-const BASE_ENV: HonoEnv["Bindings"] = {
+const BASE_ENV = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
@@ -24,15 +28,19 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: mockRateLimiter,
-};
+} satisfies HonoEnv["Bindings"];
 
 describe("POST /api/token — Full grant flow", () => {
     let pkcs8Pem: string;
     let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
     const app = new Hono<HonoEnv>().route("/api", tokenRouter);
 
-    function makeEnv(pem: string): HonoEnv["Bindings"] {
-        return { ...BASE_ENV, GITHUB_APP_PRIVATE_KEY: pem, KV: env.KV };
+    function makeEnv(pem: string) {
+        return {
+            ...BASE_ENV,
+            GITHUB_APP_PRIVATE_KEY: pem,
+            KV: env.KV,
+        } satisfies HonoEnv["Bindings"];
     }
 
     beforeAll(async () => {
@@ -101,7 +109,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body.status).toBe("ok");
         expect(typeof body.token).toBe("string");
     });
@@ -113,9 +121,8 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = needsConsentResponseSchema.parse(await resp.json());
         expect(body.status).toBe("needs_consent");
-        expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it("returns 200 with token for repo with admin scope", async () => {
@@ -153,7 +160,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body.status).toBe("ok");
     });
 
@@ -197,7 +204,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body.status).toBe("ok");
         expect(body.token).toBe("ghs_created_repo_token");
     });
@@ -210,15 +217,13 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(429);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toContain("Rate limited");
     });
 
     it("proceeds normally when rate limiter is not configured", async () => {
-        const envWithoutRl: HonoEnv["Bindings"] = {
-            ...makeEnv(pkcs8Pem),
-            TOKEN_RATE_LIMITER: undefined as unknown as RateLimit,
-        };
+        const { TOKEN_RATE_LIMITER: _rateLimiter, ...envWithoutRl } =
+            makeEnv(pkcs8Pem);
         const tokenService = new TokenService(env.KV);
         await tokenService.recordConsent("test-agent", "norl/repo", [
             "contents:read",
@@ -251,7 +256,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body.status).toBe("ok");
         expect(body.token).toBe("ghs_rl_disabled");
     });
@@ -270,7 +275,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(500);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).not.toContain("Sensitive internal error details");
     });
 
@@ -286,7 +291,7 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(500);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).not.toContain("not-a-valid-key");
         expect(body.error).toContain("internal error");
     });

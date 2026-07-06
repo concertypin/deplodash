@@ -13,7 +13,7 @@
  */
 
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
+import { validator, describeRoute } from "hono-openapi";
 import * as z from "zod";
 import { COMPOUND_SCOPES, SCOPE_LABELS } from "@/github/scopes";
 import type { HonoEnv } from "@/types";
@@ -33,11 +33,30 @@ const KNOWN_SCOPES = new Set([
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /auth — relative paths
+const zSchema = z.object({
+    scopes: z.string(),
+    repo: z.string().min(1),
+    agent_id: z.string().optional(),
+});
 
 export const consentRouter = new Hono<HonoEnv>()
     .get(
         "/consent",
         authGuard(),
+        describeRoute({
+            description:
+                "Show user-facing consent page for agent token request",
+            responses: {
+                200: {
+                    description: "HTML consent page",
+                    content: {
+                        "text/html": {
+                            schema: { type: "string" },
+                        },
+                    },
+                },
+            },
+        }),
         validator(
             "query",
             z.object({
@@ -74,6 +93,22 @@ export const consentRouter = new Hono<HonoEnv>()
     .post(
         "/consent",
         authGuard(),
+        describeRoute({
+            description: "Approve agent token request and record consent",
+            responses: {
+                302: {
+                    description: "Redirect to home page or callback URL",
+                },
+                400: {
+                    description: "Invalid consent request",
+                    content: {
+                        "text/plain": {
+                            schema: { type: "string" },
+                        },
+                    },
+                },
+            },
+        }),
         validator(
             "form",
             z.object({
@@ -122,7 +157,8 @@ export const consentRouter = new Hono<HonoEnv>()
                         requested_scopes_enc
                     );
                     if (decrypted === null) throw new Error("Decrypt failed");
-                    const ctx = JSON.parse(decrypted) as {
+
+                    const ctx = zSchema.parse(JSON.parse(decrypted)) as {
                         scopes: string;
                         repo?: string;
                         agent_id?: string;
@@ -284,6 +320,22 @@ export const consentRouter = new Hono<HonoEnv>()
     .post(
         "/revoke",
         authGuard(),
+        describeRoute({
+            description: "Revoke an agent token request consent",
+            responses: {
+                302: {
+                    description: "Redirect to home page",
+                },
+                400: {
+                    description: "Failed to revoke consent",
+                    content: {
+                        "text/plain": {
+                            schema: { type: "string" },
+                        },
+                    },
+                },
+            },
+        }),
         validator(
             "form",
             z.object({

@@ -15,18 +15,54 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { sessionMiddleware } from "@/middleware";
+import { describeRoute, resolver } from "hono-openapi";
+import * as z from "zod";
+
+const errorResponseSchema = z.object({
+    error: z.string(),
+});
+
+const userTokenResponseSchema = z.object({
+    status: z.literal("ok"),
+    token: z.string(),
+});
 
 export const userRouter = new Hono<HonoEnv>();
 
-userRouter.get("/token", sessionMiddleware(), (c) => {
-    const token = c.get("gh_token");
+userRouter.get(
+    "/token",
+    sessionMiddleware(),
+    describeRoute({
+        description: "Returns the authenticated GitHub user's OAuth token.",
+        responses: {
+            200: {
+                description: "Success",
+                content: {
+                    "application/json": {
+                        schema: resolver(userTokenResponseSchema),
+                    },
+                },
+            },
+            401: {
+                description: "Not authenticated",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+        },
+    }),
+    (c) => {
+        const token = c.get("gh_token");
 
-    if (!token) {
-        return c.json({ error: "Not authenticated" }, 401);
+        if (!token) {
+            return c.json({ error: "Not authenticated" }, 401);
+        }
+
+        return c.json({
+            status: "ok",
+            token,
+        });
     }
-
-    return c.json({
-        status: "ok",
-        token,
-    });
-});
+);
