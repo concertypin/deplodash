@@ -246,7 +246,8 @@ tokenRouter.use("/token", bodyLimit({ maxSize: 50 * 1024 }));
 
 const waitMiddleware = agentAuthMiddleware();
 const waitDescription = describeRoute({
-    description: "Wait for a user to approve a token request (Long Polling)",
+    description:
+        "Wait for a user to approve a token request (Long Polling). Also supports the QUERY HTTP method (identical behavior).",
     responses: {
         204: {
             description: "Consent granted",
