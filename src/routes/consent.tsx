@@ -102,7 +102,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 400: {
                     description: "Invalid consent request",
                     content: {
-                        "text/plain": {
+                        "text/html": {
                             schema: { type: "string" },
                         },
                     },
