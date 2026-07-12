@@ -11,6 +11,7 @@ import * as z from "zod";
 export const authRouter = new Hono<HonoEnv>().get(
     "/github",
     describeRoute({
+        tags: ["Auth"],
         description: "Redirect to GitHub OAuth login flow",
         responses: {
             302: {
@@ -30,6 +31,7 @@ export const authRouter = new Hono<HonoEnv>().get(
                 .refine(isSafeRedirect, "Invalid redirect URL")
                 .meta({
                     description: "URL to redirect to after login (default: /)",
+                    examples: ["/dashboard", "/setup"],
                 }),
         })
     ),

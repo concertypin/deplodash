@@ -22,6 +22,7 @@ export const oauthRouter = new Hono<HonoEnv>()
     .get(
         "/callback",
         describeRoute({
+            tags: ["Auth"],
             description:
                 "GitHub OAuth callback — exchange authorization code for session cookie",
             responses: {
@@ -69,8 +70,22 @@ export const oauthRouter = new Hono<HonoEnv>()
         validator(
             "query",
             z.object({
-                code: z.string().min(1, "Authorization code is required"),
-                state: z.string().min(1, "State parameter is required"),
+                code: z
+                    .string()
+                    .min(1, "Authorization code is required")
+                    .meta({
+                        description:
+                            "Authorization code from GitHub OAuth redirect",
+                        examples: ["abc123def"],
+                    }),
+                state: z
+                    .string()
+                    .min(1, "State parameter is required")
+                    .meta({
+                        description:
+                            "Encrypted state (verifier + redirect URL)",
+                        examples: ["v1.encrypted_payload"],
+                    }),
             })
         ),
         async (c) => {
@@ -151,6 +166,7 @@ export const oauthRouter = new Hono<HonoEnv>()
     .get(
         "/logout",
         describeRoute({
+            tags: ["Auth"],
             description: "Clear session cookie and redirect to home page",
             responses: {
                 302: {

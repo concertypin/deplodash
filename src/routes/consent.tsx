@@ -44,6 +44,7 @@ export const consentRouter = new Hono<HonoEnv>()
         "/consent",
         authGuard(),
         describeRoute({
+            tags: ["Auth"],
             description:
                 "Show user-facing consent page for agent token request",
             responses: {
@@ -60,9 +61,27 @@ export const consentRouter = new Hono<HonoEnv>()
         validator(
             "query",
             z.object({
-                repo: z.string().min(1),
-                scopes: z.string().min(1),
-                agent_id: z.string().optional(),
+                repo: z
+                    .string()
+                    .min(1)
+                    .meta({
+                        description: "Repository full name",
+                        examples: ["owner/repo"],
+                    }),
+                scopes: z
+                    .string()
+                    .min(1)
+                    .meta({
+                        description: "Comma-separated scopes requested",
+                        examples: ["contents:read,issues:write"],
+                    }),
+                agent_id: z
+                    .string()
+                    .optional()
+                    .meta({
+                        description: "Agent identifier requesting the token",
+                        examples: ["agent-42"],
+                    }),
             })
         ),
         async (c) => {
@@ -94,6 +113,7 @@ export const consentRouter = new Hono<HonoEnv>()
         "/consent",
         authGuard(),
         describeRoute({
+            tags: ["Auth"],
             description: "Approve agent token request and record consent",
             responses: {
                 302: {
@@ -112,13 +132,47 @@ export const consentRouter = new Hono<HonoEnv>()
         validator(
             "form",
             z.object({
-                repo: z.string().min(1),
+                repo: z
+                    .string()
+                    .min(1)
+                    .meta({
+                        description: "Repository full name",
+                        examples: ["owner/repo"],
+                    }),
                 // scopes can be a single string (legacy) or array of strings (granular checkboxes).
                 // Optional because unchecking all checkboxes means nothing is posted for scopes.
-                scopes: z.union([z.string(), z.array(z.string())]).optional(),
-                requested_scopes: z.string().optional(),
-                requested_scopes_enc: z.string().optional(),
-                agent_id: z.string().min(1).optional(),
+                scopes: z
+                    .union([z.string(), z.array(z.string())])
+                    .optional()
+                    .meta({
+                        description: "Approved scope(s)",
+                        examples: [
+                            "contents:read",
+                            ["contents:read", "issues:write"],
+                        ],
+                    }),
+                requested_scopes: z
+                    .string()
+                    .optional()
+                    .meta({
+                        description:
+                            "Serialized list of originally requested scopes",
+                    }),
+                requested_scopes_enc: z
+                    .string()
+                    .optional()
+                    .meta({
+                        description:
+                            "Encrypted original consent request payload",
+                    }),
+                agent_id: z
+                    .string()
+                    .min(1)
+                    .optional()
+                    .meta({
+                        description: "Agent identifier requesting the token",
+                        examples: ["agent-42"],
+                    }),
             })
         ),
         async (c) => {
@@ -317,6 +371,7 @@ export const consentRouter = new Hono<HonoEnv>()
         "/revoke",
         authGuard(),
         describeRoute({
+            tags: ["Auth"],
             description: "Revoke an agent token request consent",
             responses: {
                 302: {
@@ -335,9 +390,27 @@ export const consentRouter = new Hono<HonoEnv>()
         validator(
             "form",
             z.object({
-                repo: z.string().min(1),
-                scopes: z.string().min(1),
-                agent_id: z.string().min(1).optional(),
+                repo: z
+                    .string()
+                    .min(1)
+                    .meta({
+                        description: "Repository full name",
+                        examples: ["owner/repo"],
+                    }),
+                scopes: z
+                    .string()
+                    .min(1)
+                    .meta({
+                        description: "Comma-separated scopes to revoke",
+                        examples: ["contents:read"],
+                    }),
+                agent_id: z
+                    .string()
+                    .min(1)
+                    .optional()
+                    .meta({
+                        description: "Agent whose token consent to revoke",
+                    }),
             })
         ),
         async (c) => {

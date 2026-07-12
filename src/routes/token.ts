@@ -28,8 +28,19 @@ const requestTokenSchema = z.object({
         .regex(
             /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
             "Invalid repository format"
-        ),
-    scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
+        )
+        .meta({
+            description: "Repository full name (owner/name)",
+            examples: ["owner/repo", "my-org/my-project"],
+        }),
+    scopes: z
+        .array(z.string().min(1))
+        .min(1)
+        .default(["contents:read"])
+        .meta({
+            description: "Requested GitHub API scopes",
+            examples: [["contents:read"], ["contents:read", "issues:write"]],
+        }),
 });
 
 export const tokenResponseSchema = z.object({
@@ -64,12 +75,11 @@ const KNOWN_SAFE_ERRORS: RegExp[] = [
 ];
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
-// Mounted at /api — relative paths
-
 export const tokenRouter = new Hono<HonoEnv>().post(
     "/token",
     agentAuthMiddleware(),
     describeRoute({
+        tags: ["Token"],
         description:
             "Request a scoped GitHub Installation Token for a repository",
         responses: {
@@ -246,6 +256,7 @@ tokenRouter.use("/token", bodyLimit({ maxSize: 50 * 1024 }));
 
 const waitMiddleware = agentAuthMiddleware();
 const waitDescription = describeRoute({
+    tags: ["Token"],
     description:
         "Wait for a user to approve a token request (Long Polling). Also supports the QUERY HTTP method (identical behavior).",
     responses: {

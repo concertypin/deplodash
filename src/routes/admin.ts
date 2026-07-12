@@ -15,26 +15,54 @@ import { validator, describeRoute, resolver } from "hono-openapi";
 import * as z from "zod";
 
 const errorResponseSchema = z.object({
-    error: z.string(),
+    error: z
+        .string()
+        .meta({
+            description: "Error message",
+            examples: ["Not authenticated", "Forbidden"],
+        }),
 });
 
 const agentListResponseSchema = z.object({
     status: z.literal("ok"),
     tokens: z.array(
         z.object({
-            agent_id: z.string(),
-            label: z.string(),
-            created_at: z.number(),
+            agent_id: z
+                .string()
+                .meta({
+                    description: "Unique agent identifier",
+                    examples: ["agent-42"],
+                }),
+            label: z
+                .string()
+                .meta({
+                    description: "Human-readable agent label",
+                    examples: ["CI/CD Pipeline"],
+                }),
+            created_at: z
+                .number()
+                .meta({
+                    description:
+                        "Unix timestamp (ms) when the token was created",
+                }),
         })
     ),
 });
 
 const revokeAgentTokenSchema = z.object({
-    token: z.string().min(1),
+    token: z
+        .string()
+        .min(1)
+        .meta({
+            description: "Agent token to revoke",
+            examples: ["agent-token-abc123"],
+        }),
 });
 
 const revokeResponseSchema = z.object({
-    status: z.literal("ok"),
+    status: z
+        .literal("ok")
+        .meta({ description: "Always 'ok' on successful revocation" }),
 });
 
 function isAdminUser(login: string, adminUsers: string | undefined): boolean {
@@ -57,6 +85,7 @@ adminRouter.use("*", sessionMiddleware());
 adminRouter.get(
     "/agent/list",
     describeRoute({
+        tags: ["Admin"],
         description:
             "Returns all registered agent tokens (metadata only, no raw tokens).",
         responses: {
@@ -122,6 +151,7 @@ adminRouter.get(
 adminRouter.post(
     "/agent/revoke",
     describeRoute({
+        tags: ["Admin"],
         description: "Revoke an agent token.",
         responses: {
             200: {

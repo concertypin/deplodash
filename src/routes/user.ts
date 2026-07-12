@@ -19,12 +19,22 @@ import { describeRoute, resolver } from "hono-openapi";
 import * as z from "zod";
 
 const errorResponseSchema = z.object({
-    error: z.string(),
+    error: z
+        .string()
+        .meta({
+            description: "Error message",
+            examples: ["Not authenticated"],
+        }),
 });
 
 const userTokenResponseSchema = z.object({
-    status: z.literal("ok"),
-    token: z.string(),
+    status: z.literal("ok").meta({ description: "Always 'ok' on success" }),
+    token: z
+        .string()
+        .meta({
+            description: "GitHub OAuth access token",
+            examples: ["gho_xxxxxxxxxxxx"],
+        }),
 });
 
 export const userRouter = new Hono<HonoEnv>();
@@ -33,6 +43,7 @@ userRouter.get(
     "/token",
     sessionMiddleware(),
     describeRoute({
+        tags: ["User"],
         description: "Returns the authenticated GitHub user's OAuth token.",
         responses: {
             200: {
