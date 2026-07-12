@@ -325,7 +325,7 @@ export const consentRouter = new Hono<HonoEnv>()
                 400: {
                     description: "Failed to revoke consent",
                     content: {
-                        "text/plain": {
+                        "text/html": {
                             schema: { type: "string" },
                         },
                     },
