@@ -61,12 +61,15 @@ export const Layout: FC<LayoutProps> = ({ title, children }) => (
  * return c.html(renderPage(<MyPage />));
  * ```
  */
+
 export function renderPage(content: Child): string {
-    // JSXNode has a proper toString() that renders to HTML.
-    // Strings and numbers are also fine.
-    const str =
-        typeof content === "string"
-            ? content
-            : (content as { toString(): string }).toString();
-    return `<!DOCTYPE html>\n${str}`;
+    if (content === null || content === undefined) {
+        throw new Error("renderPage() received null/undefined content");
+    }
+    if (typeof content === "string") {
+        return `<!DOCTYPE html>\n${content}`;
+    }
+    // oxlint-disable-next-line no-base-to-string
+    const rendered = String(content);
+    return `<!DOCTYPE html>\n${rendered}`;
 }

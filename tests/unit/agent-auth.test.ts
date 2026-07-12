@@ -7,25 +7,19 @@ import { z } from "zod";
 
 const errorResponseSchema = z.object({ error: z.string() });
 
-const MIN_ENV: HonoEnv["Bindings"] = {
+const MIN_ENV = {
     ENCRYPTION_SECRET: "test-secret-1234567890123456",
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
-} as HonoEnv["Bindings"];
-
+    GITHUB_APP_ID: "123456",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+} satisfies HonoEnv["Bindings"];
 describe("agentAuthMiddleware", () => {
-    let app: Hono<HonoEnv>;
-    let client: ReturnType<typeof testClient>;
-
-    beforeEach(async () => {
-        // Clear KV
-        const { keys } = await env.KV.list();
-        await Promise.all(keys.map((k) => env.KV.delete(k.name)));
-
-        // Create a simple Hono app that uses the agentAuthMiddleware
-        app = new Hono<HonoEnv>().post(
+    function createApp() {
+        return new Hono<HonoEnv>().post(
             "/test",
             async (c, next) => {
                 const { agentAuthMiddleware } =
@@ -37,18 +31,23 @@ describe("agentAuthMiddleware", () => {
                 return c.json({ agent_id: agentId });
             }
         );
-        client = testClient(app, MIN_ENV) as typeof client;
-    });
+    }
 
+    beforeEach(async () => {
+        // Clear KV
+        const { keys } = await env.KV.list();
+        await Promise.all(keys.map((k) => env.KV.delete(k.name)));
+    });
     it("returns 401 when no Authorization header", async () => {
-        const resp = await client.test!.$post({});
+        const client = testClient(createApp(), MIN_ENV);
+        const resp = await client.test.$post({});
         expect(resp.status).toBe(401);
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toContain("Missing");
     });
-
     it("returns 401 when token is not registered", async () => {
-        const resp = await client.test!.$post(
+        const client = testClient(createApp(), MIN_ENV);
+        const resp = await client.test.$post(
             {},
             { headers: { Authorization: "Bearer nonexistent-token" } }
         );
@@ -56,7 +55,6 @@ describe("agentAuthMiddleware", () => {
         const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toContain("Invalid");
     });
-
     it("returns 200 with agent_id when token is valid", async () => {
         const { registerAgentToken } = await import("@/middleware/agent-auth");
         await registerAgentToken(
@@ -66,12 +64,15 @@ describe("agentAuthMiddleware", () => {
             "My Agent"
         );
 
-        const resp = await client.test!.$post(
+        const client = testClient(createApp(), MIN_ENV);
+        const resp = await client.test.$post(
             {},
             { headers: { Authorization: "Bearer test-agent-token-123" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = z
+            .object({ agent_id: z.string() })
+            .parse(await resp.json());
         expect(body.agent_id).toBe("agent-42");
     });
 });

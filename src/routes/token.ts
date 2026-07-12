@@ -28,18 +28,29 @@ const requestTokenSchema = z.object({
         .regex(
             /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
             "Invalid repository format"
-        ),
-    scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
+        )
+        .meta({
+            description: "Repository full name (owner/name)",
+            examples: ["owner/repo", "my-org/my-project"],
+        }),
+    scopes: z
+        .array(z.string().min(1))
+        .min(1)
+        .default(["contents:read"])
+        .meta({
+            description: "Requested GitHub API scopes",
+            examples: [["contents:read"], ["contents:read", "issues:write"]],
+        }),
 });
 
-const tokenResponseSchema = z.object({
+export const tokenResponseSchema = z.object({
     status: z.literal("ok"),
     token: z.string(),
     expires_at: z.string(),
     effective_scopes: z.array(z.string()).optional(),
 });
 
-const needsConsentResponseSchema = z.object({
+export const needsConsentResponseSchema = z.object({
     status: z.literal("needs_consent"),
     url: z.string(),
     /** The scopes the agent requested. */
@@ -48,7 +59,7 @@ const needsConsentResponseSchema = z.object({
     approved_scopes: z.array(z.string()).optional(),
 });
 
-const errorResponseSchema = z.object({
+export const errorResponseSchema = z.object({
     error: z.string(),
 });
 
@@ -64,12 +75,11 @@ const KNOWN_SAFE_ERRORS: RegExp[] = [
 ];
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
-// Mounted at /api — relative paths
-
 export const tokenRouter = new Hono<HonoEnv>().post(
     "/token",
     agentAuthMiddleware(),
     describeRoute({
+        tags: ["Token"],
         description:
             "Request a scoped GitHub Installation Token for a repository",
         responses: {
@@ -106,6 +116,22 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     },
                 },
             },
+            429: {
+                description: "Rate limited. Try again later.",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
+            500: {
+                description: "Internal server error",
+                content: {
+                    "application/json": {
+                        schema: resolver(errorResponseSchema),
+                    },
+                },
+            },
         },
     }),
     validator("json", requestTokenSchema),
@@ -126,7 +152,9 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
         try {
             const gh = new GitHubApp(appId, privateKey, c.env.KV);
-            const [owner, name] = repo.split("/") as [string, string];
+            const slashIdx = repo.indexOf("/");
+            const owner = repo.slice(0, slashIdx);
+            const name = repo.slice(slashIdx + 1);
             const tokenService = new TokenService(c.env.KV);
             const agentId = c.get("agent_id")!;
 
@@ -226,44 +254,58 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 );
 tokenRouter.use("/token", bodyLimit({ maxSize: 50 * 1024 }));
 
-tokenRouter.on(
-    "QUERY",
-    "/wait",
-    agentAuthMiddleware(),
-    describeRoute({
-        description:
-            "Wait for a user to approve a token request (Long Polling)",
-        responses: {
-            204: {
-                description: "Consent granted",
-            },
-            403: {
-                description:
-                    "Timeout (Consent not granted within the wait period)",
-                content: {
-                    "application/json": {
-                        schema: resolver(errorResponseSchema),
-                    },
-                },
-            },
-            400: {
-                description: "Bad request",
-                content: {
-                    "application/json": {
-                        schema: resolver(errorResponseSchema),
-                    },
-                },
-            },
-            401: {
-                description: "Invalid or missing agent token",
-                content: {
-                    "application/json": {
-                        schema: resolver(errorResponseSchema),
-                    },
+const waitMiddleware = agentAuthMiddleware();
+const waitDescription = describeRoute({
+    tags: ["Token"],
+    description:
+        "Wait for a user to approve a token request (Long Polling). Also supports the QUERY HTTP method (identical behavior).",
+    responses: {
+        204: {
+            description: "Consent granted",
+        },
+        403: {
+            description: "Timeout (Consent not granted within the wait period)",
+            content: {
+                "application/json": {
+                    schema: resolver(errorResponseSchema),
                 },
             },
         },
-    }),
+        400: {
+            description: "Bad request",
+            content: {
+                "application/json": {
+                    schema: resolver(errorResponseSchema),
+                },
+            },
+        },
+        401: {
+            description: "Invalid or missing agent token",
+            content: {
+                "application/json": {
+                    schema: resolver(errorResponseSchema),
+                },
+            },
+        },
+        429: {
+            description: "Rate limited. Try again later.",
+            content: {
+                "application/json": {
+                    schema: resolver(errorResponseSchema),
+                },
+            },
+        },
+    },
+});
+// ─── Wait (long-polling) route ────────────────────────────────────────────────
+// Both QUERY and POST handle the same logic. POST exists because hono-openapi's
+// OpenAPI generator doesn't support the non-standard QUERY method.
+
+tokenRouter.on(
+    "QUERY",
+    "/wait",
+    waitMiddleware,
+    waitDescription,
     validator("json", requestTokenSchema),
     async (c) => {
         const { repo, scopes } = c.req.valid("json");
@@ -350,8 +392,134 @@ tokenRouter.on(
                 if (finished) return;
                 finished = true;
 
-                clearTimeout(timeoutId as unknown as number);
-                clearInterval(pollIntervalId as unknown as number);
+                clearTimeout(timeoutId);
+                clearInterval(pollIntervalId);
+                removeWaiter();
+
+                if (c.req.raw.signal) {
+                    c.req.raw.signal.removeEventListener("abort", onAbort);
+                }
+            };
+
+            const finishWithSuccess = () => {
+                cleanup();
+                resolve(new Response(null, { status: 204 }));
+            };
+
+            const finishWithTimeout = () => {
+                cleanup();
+                resolve(
+                    c.json(
+                        { error: "Timeout waiting for consent approval" },
+                        403
+                    )
+                );
+            };
+
+            const onAbort = () => {
+                cleanup();
+                resolve(new Response(null, { status: 499 }));
+            };
+
+            // Cloudflare Workers specific: Ensure the promise resolves if the client disconnects
+            if (c.req.raw.signal) {
+                c.req.raw.signal.addEventListener("abort", onAbort);
+            }
+        });
+    }
+);
+tokenRouter.post(
+    "/wait",
+    waitMiddleware,
+    waitDescription,
+    validator("json", requestTokenSchema),
+    async (c) => {
+        const { repo, scopes } = c.req.valid("json");
+        const agentId = c.get("agent_id")!;
+        // Rate limiting — per-agent throttle
+        const rateLimiter = c.env.TOKEN_RATE_LIMITER;
+        if (rateLimiter) {
+            try {
+                const { success } = await rateLimiter.limit({
+                    key: agentId,
+                });
+                if (!success) {
+                    return c.json(
+                        { error: "Rate limited. Try again later." },
+                        429
+                    );
+                }
+            } catch {
+                // Rate limiter unavailable (e.g., local dev) — proceed
+            }
+        }
+        const tokenService = new TokenService(c.env.KV);
+
+        // First check if consent is already granted
+        const effectiveScopes = await tokenService.findConsentScopes(
+            agentId,
+            repo,
+            scopes
+        );
+        if (effectiveScopes) {
+            return new Response(null, { status: 204 });
+        }
+
+        // Wait for up to 1 minute 30 seconds (90s)
+        const TIMEOUT_MS = 90 * 1000;
+        const POLL_INTERVAL_MS = 5000;
+
+        return new Promise<Response>((resolve) => {
+            let finished = false;
+
+            // 1. Setup in-isolate module-level Map for instant notification
+            const removeWaiter = addWaiter(repo, agentId, () => {
+                void (async () => {
+                    try {
+                        // Double check with KV to be sure
+                        const currentScopes =
+                            await tokenService.findConsentScopes(
+                                agentId,
+                                repo,
+                                scopes
+                            );
+                        if (currentScopes) {
+                            finishWithSuccess();
+                        }
+                    } catch (e) {
+                        console.error("Error in wait-notifier listener", e);
+                    }
+                })();
+            });
+
+            const timeoutId = setTimeout(() => {
+                finishWithTimeout();
+            }, TIMEOUT_MS);
+
+            const pollIntervalId = setInterval(() => {
+                void (async () => {
+                    try {
+                        const currentScopes =
+                            await tokenService.findConsentScopes(
+                                agentId,
+                                repo,
+                                scopes
+                            );
+                        if (currentScopes) {
+                            finishWithSuccess();
+                        }
+                    } catch (e) {
+                        console.error("Error polling for consent", e);
+                    }
+                })();
+            }, POLL_INTERVAL_MS);
+
+            const cleanup = () => {
+                if (finished) return;
+                finished = true;
+
+                clearTimeout(timeoutId);
+                clearInterval(pollIntervalId);
                 removeWaiter();
 
                 if (c.req.raw.signal) {

@@ -62,19 +62,15 @@ describe("initKey", () => {
         const key = await initKey("test-secret-1234567890123456");
         expect(key).toBeDefined();
         expect(key.algorithm).toBeDefined();
-        expect((key.algorithm as AesKeyAlgorithm).name).toBe("AES-GCM");
+        expect(key.algorithm.name).toBe("AES-GCM");
     });
 
     it("throws TypeError when no secret is provided", async () => {
-        await expect(initKey(undefined as unknown as string)).rejects.toThrow(
-            TypeError
-        );
+        await expect(initKey(undefined)).rejects.toThrow(TypeError);
     });
 
     it("throws with descriptive message when no secret", async () => {
-        await expect(initKey(undefined as unknown as string)).rejects.toThrow(
-            "ENCRYPTION_SECRET"
-        );
+        await expect(initKey(undefined)).rejects.toThrow("ENCRYPTION_SECRET");
     });
 });
 

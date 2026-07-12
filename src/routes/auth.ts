@@ -3,13 +3,25 @@ import type { HonoEnv } from "@/types";
 import { getOrInitKey } from "@/crypto";
 import { randomBytes, pkceChallenge, encryptWith } from "@/crypto";
 import { isSafeRedirect } from "@/helpers";
-import { validator } from "hono-openapi";
+import { validator, describeRoute } from "hono-openapi";
 import * as z from "zod";
 // ─── Auth routes (mounted at /auth) ───────────────────────────────────────────
 // Paths are relative to the mount point (/auth/github).
 
 export const authRouter = new Hono<HonoEnv>().get(
     "/github",
+    describeRoute({
+        tags: ["Auth"],
+        description: "Redirect to GitHub OAuth login flow",
+        responses: {
+            302: {
+                description: "Redirect to GitHub OAuth authorization page",
+            },
+            429: {
+                description: "Rate limited. Try again later.",
+            },
+        },
+    }),
     validator(
         "query",
         z.object({
@@ -19,6 +31,7 @@ export const authRouter = new Hono<HonoEnv>().get(
                 .refine(isSafeRedirect, "Invalid redirect URL")
                 .meta({
                     description: "URL to redirect to after login (default: /)",
+                    examples: ["/dashboard", "/setup"],
                 }),
         })
     ),

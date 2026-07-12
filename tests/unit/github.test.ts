@@ -40,9 +40,9 @@ describe("GitHubClient", () => {
                 "https://github.com/login/oauth/access_token",
                 expect.objectContaining({
                     method: "POST",
-                    body: expect.stringContaining(
-                        "test-code"
-                    ) as unknown as string,
+                    // library type is `any`, so can be ignored
+                    // oxlint-disable-next-line typescript/no-unsafe-assignment
+                    body: expect.stringContaining("test-code"),
                 })
             );
         });
@@ -168,9 +168,9 @@ describe("GitHubClient", () => {
                 "https://api.github.com/user/repos",
                 expect.objectContaining({
                     method: "POST",
-                    body: expect.stringContaining(
-                        '"private":true'
-                    ) as unknown as string,
+                    // library type is `any`, so can be ignored
+                    // oxlint-disable-next-line typescript/no-unsafe-assignment
+                    body: expect.stringContaining('"private":true'),
                 })
             );
         });
@@ -191,9 +191,9 @@ describe("GitHubClient", () => {
             expect(mockFetch).toHaveBeenCalledWith(
                 "https://api.github.com/user/repos",
                 expect.objectContaining({
-                    body: expect.stringContaining(
-                        '"private":false'
-                    ) as unknown as string,
+                    // library type is `any`, so can be ignored
+                    // oxlint-disable-next-line typescript/no-unsafe-assignment
+                    body: expect.stringContaining('"private":false'),
                 })
             );
         });

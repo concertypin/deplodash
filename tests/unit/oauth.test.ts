@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, vi, assert } from "vitest";
 import { TEST_SECRET } from "../helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
@@ -8,14 +8,31 @@ import { authRouter } from "@/routes/auth";
 import { env } from "cloudflare:workers";
 import { resetKeyCache, getOrInitKey, encryptWith } from "@/crypto";
 import { sessionMiddleware } from "@/middleware";
+import { z } from "zod";
 
-const BASE_ENV: HonoEnv["Bindings"] = {
+const validatorErrorSchema = z.object({
+    success: z.literal(false),
+    error: z.array(
+        z.object({
+            code: z.string(),
+            expected: z.string().optional(),
+            path: z.array(z.string()),
+            message: z.string(),
+        })
+    ),
+    data: z.record(z.string(), z.unknown()),
+});
+
+const BASE_ENV = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
     KV: env.KV,
-} as HonoEnv["Bindings"];
+    GITHUB_APP_ID: "123456",
+    GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+} satisfies HonoEnv["Bindings"];
 
 beforeEach(() => {
     resetKeyCache();
@@ -26,19 +43,25 @@ describe("GET /callback", () => {
         .use("*", sessionMiddleware())
         .route("/", oauthRouter);
     const client = testClient(app, BASE_ENV);
-
     it("returns 400 when code and state are missing", async () => {
-        const resp = await client.callback.$get();
+        const resp = await client.callback.$get({
+            query: { code: "", state: "" },
+        });
         expect(resp.status).toBe(400);
-        expect(await resp.text()).toContain("Missing code or state");
+        const body = validatorErrorSchema.parse(await resp.json());
+        expect(body.success).toBe(false);
+        expect(body.error.some((e) => e.path.includes("code"))).toBe(true);
+        expect(body.error.some((e) => e.path.includes("state"))).toBe(true);
     });
 
     it("returns 400 when state is missing", async () => {
         const resp = await client.callback.$get({
-            query: { code: "testcode" },
+            query: { code: "testcode", state: "" },
         });
         expect(resp.status).toBe(400);
-        expect(await resp.text()).toContain("Missing code or state");
+        const body = validatorErrorSchema.parse(await resp.json());
+        expect(body.success).toBe(false);
+        expect(body.error.some((e) => e.path.includes("state"))).toBe(true);
     });
 
     it("returns 400 when state is malformed (cannot decrypt)", async () => {
@@ -142,7 +165,7 @@ describe("GET /callback", () => {
     });
 
     it("uses r field from state payload as redirect_uri in code exchange", async () => {
-        const mockFetch = vi.fn<() => Promise<Response>>().mockResolvedValue(
+        const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(
             new Response(
                 JSON.stringify({
                     access_token: "gho_r_field_token",
@@ -173,18 +196,24 @@ describe("GET /callback", () => {
         expect(resp.status).toBe(302);
 
         // Verify the fetch call to GitHub used the r field as redirect_uri
-        const fetchCall = (
-            mockFetch.mock.calls as unknown as Array<
-                [string, { body?: string }]
-            >
-        ).find(
+        const fetchCall = mockFetch.mock.calls.find(
             ([url]) => url === "https://github.com/login/oauth/access_token"
         );
         expect(fetchCall).toBeDefined();
-        const fetchInit = fetchCall![1];
-        const parsed: unknown = JSON.parse(fetchInit.body!);
-        const body = parsed as { redirect_uri: string };
-        expect(body.redirect_uri).toBe("http://localhost:5178/callback");
+        const fetchInit = fetchCall?.[1];
+        assert(fetchInit && fetchInit.body, "fetch call should have a body");
+        assert(
+            typeof fetchInit.body === "string",
+            "fetch body should be a string"
+        );
+        const parsed: unknown = JSON.parse(fetchInit.body);
+        assert(
+            typeof parsed === "object" &&
+                parsed !== null &&
+                "redirect_uri" in parsed,
+            "parsed body should be an object"
+        );
+        expect(parsed.redirect_uri).toBe("http://localhost:5178/callback");
     });
 
     it("protects against open redirect via state payload", async () => {

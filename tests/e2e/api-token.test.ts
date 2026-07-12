@@ -10,12 +10,16 @@ import {
 import { testClient } from "hono/testing";
 import app from "@/index";
 import type { HonoEnv } from "@/types";
+import { TEST_SECRET } from "../helpers";
 import { env } from "cloudflare:workers";
 import { TokenService } from "@/token-service";
 import { registerAgentToken } from "@/middleware/agent-auth";
 import { resetKeyCache } from "@/crypto";
-
-const TEST_SECRET = "test-secret-1234567890123456";
+import {
+    tokenResponseSchema,
+    needsConsentResponseSchema,
+    errorResponseSchema,
+} from "@/routes/token";
 
 const mockRateLimiter = {
     limit: vi.fn<(_options: { key: string }) => Promise<{ success: boolean }>>(
@@ -23,7 +27,7 @@ const mockRateLimiter = {
     ),
 };
 
-const BASE_ENV: HonoEnv["Bindings"] = {
+const BASE_ENV = {
     ENCRYPTION_SECRET: TEST_SECRET,
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
@@ -33,7 +37,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
     TOKEN_RATE_LIMITER: mockRateLimiter,
-};
+} satisfies HonoEnv["Bindings"];
 
 let pkcs8Pem = BASE_ENV.GITHUB_APP_PRIVATE_KEY;
 let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
@@ -50,11 +54,11 @@ async function clearKv(): Promise<void> {
     await Promise.all(keys.map((key) => env.KV.delete(key.name)));
 }
 
-function makeEnv(): HonoEnv["Bindings"] {
+function makeEnv() {
     return {
         ...BASE_ENV,
         GITHUB_APP_PRIVATE_KEY: pkcs8Pem,
-    };
+    } satisfies HonoEnv["Bindings"];
 }
 
 function makeClient() {
@@ -133,13 +137,12 @@ describe("API token E2E flow", () => {
         );
 
         expect(first.status).toBe(200);
-        const firstBody = (await first.json()) as Record<string, unknown>;
+        const firstBody = tokenResponseSchema.parse(await first.json());
         expect(firstBody).toMatchObject({
             status: "ok",
             token: "ghs_scoped_token_456",
         });
         expect(typeof firstBody.expires_at).toBe("string");
-        expect(Array.isArray(firstBody.effective_scopes)).toBe(true);
         expect(firstBody.effective_scopes).toEqual(["contents:read"]);
 
         expect(mockFetch).toHaveBeenCalledTimes(4);
@@ -148,9 +151,8 @@ describe("API token E2E flow", () => {
             { json: { repo: "owner/repo", scopes: ["contents:read"] } },
             { headers: { Authorization: "Bearer agent-token-e2e" } }
         );
-
         expect(second.status).toBe(200);
-        const secondBody = (await second.json()) as Record<string, unknown>;
+        const secondBody = tokenResponseSchema.parse(await second.json());
         expect(secondBody).toMatchObject({
             status: "ok",
             token: "ghs_scoped_token_456",
@@ -211,9 +213,8 @@ describe("API token E2E flow", () => {
             },
             { headers: { Authorization: "Bearer agent-token-create" } }
         );
-
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body).toMatchObject({
             status: "ok",
             token: "ghs_created_repo_token",
@@ -242,9 +243,8 @@ describe("API token E2E flow", () => {
             },
             { headers: { Authorization: "Bearer agent-token-needs-consent" } }
         );
-
         expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = needsConsentResponseSchema.parse(await resp.json());
         expect(body.status).toBe("needs_consent");
         expect(typeof body.url).toBe("string");
         expect(mockFetch).not.toHaveBeenCalled();
@@ -259,9 +259,8 @@ describe("API token E2E flow", () => {
                 scopes: ["contents:read"],
             },
         });
-
         expect(resp.status).toBe(401);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = errorResponseSchema.parse(await resp.json());
         expect(body.error).toBe("Missing or invalid Authorization header");
         expect(mockFetch).not.toHaveBeenCalled();
     });

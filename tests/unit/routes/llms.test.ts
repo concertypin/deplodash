@@ -9,7 +9,13 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
     CALLBACK_URL: "http://localhost:5178/callback",
-    KV: undefined as unknown as KVNamespace,
+    KV: new Proxy({} as KVNamespace, {
+        get() {
+            throw new Error(
+                "KV binding not provided. Each test file must supply its own KV."
+            );
+        },
+    }),
     GITHUB_APP_ID: "123456",
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",

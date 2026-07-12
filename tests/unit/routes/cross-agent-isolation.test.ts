@@ -15,8 +15,11 @@ import { tokenRouter } from "@/routes/token";
 import { TokenService } from "@/token/service";
 import { env } from "cloudflare:workers";
 import { registerAgentToken } from "@/middleware/agent-auth";
-
-const BASE_ENV: HonoEnv["Bindings"] = {
+import {
+    tokenResponseSchema,
+    needsConsentResponseSchema,
+} from "@/routes/token";
+const BASE_ENV = {
     ENCRYPTION_SECRET: "test-secret-1234567890123456",
     GITHUB_CLIENT_ID: "test-client",
     GITHUB_CLIENT_SECRET: "test-secret",
@@ -25,7 +28,7 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     GITHUB_APP_ID: "123456",
     GITHUB_APP_PRIVATE_KEY:
         "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
-};
+} satisfies HonoEnv["Bindings"];
 
 describe("Cross-agent consent isolation", () => {
     let pkcs8Pem: string;
@@ -91,7 +94,7 @@ describe("Cross-agent consent isolation", () => {
             { headers: { Authorization: "Bearer agent-b-token" } }
         );
         expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = needsConsentResponseSchema.parse(await resp.json());
         expect(body.status).toBe("needs_consent");
         expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -141,7 +144,7 @@ describe("Cross-agent consent isolation", () => {
             { headers: { Authorization: "Bearer agent-a-token-2" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = tokenResponseSchema.parse(await resp.json());
         expect(body.status).toBe("ok");
         expect(body.token).toBe("ghs_agent_a_token");
     });
