@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.cache/test.tsbuildinfo",
+        "lib": ["ESNext", "DOM", "DOM.Iterable"],
+        "types": ["vite/client"]
+    },
+    "include": [
+        "tests/**/*.ts",
+        "tests/**/*.svelte",
+        "src/**/*.ts",
+        "src/**/*.svelte"
+    ],
+    "references": [
+        {
+            "path": "./tsconfig.app.json"
+        }
+    ],
+    "extends": "./tsconfig.base.json"
+}
