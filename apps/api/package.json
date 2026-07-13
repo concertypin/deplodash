@@ -1,0 +1,56 @@
+{
+    "name": "@deplodash/api",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "license": "Apache-2.0",
+    "author": {
+        "name": "concertypin",
+        "url": "https://github.com/concertypin"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/concertypin/deplodash"
+    },
+    "types": "./src/index.ts",
+    "scripts": {
+        "dev": "vite dev",
+        "build": "vite build",
+        "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+        "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
+        "lint": "pnpm run lint:oxlint --fix",
+        "lint:check": "pnpm run lint:oxlint",
+        "lint:oxlint": "oxlint -c oxlint.config.ts . --type-aware --type-check --report-unused-disable-directives-severity=error",
+        "postinstall": "pnpm run cf-typegen",
+        "test": "vitest run",
+        "deploy": "pnpm run build && wrangler deploy",
+        "token": "node scripts/agent-token-manager.ts"
+    },
+    "engines": {
+        "node": ">=24"
+    },
+    "dependencies": {
+        "@hono/standard-validator": "^0.2.2",
+        "@scalar/hono-api-reference": "^0.11.6",
+        "hono": "^4.12.27",
+        "hono-openapi": "^1.3.0",
+        "zod": "^4.4.3"
+    },
+    "devDependencies": {
+        "@cloudflare/vite-plugin": "^1.42.3",
+        "@cloudflare/vitest-pool-workers": "^0.16.20",
+        "@types/node": "^26.0.1",
+        "@vitest/coverage-istanbul": "^4.1.9",
+        "cross-env": "^10.1.0",
+        "globals": "^17.7.0",
+        "oxlint": "^1.71.0",
+        "oxlint-tsgolint": "^0.23.0",
+        "prettier": "^3.8.5",
+        "simple-git-hooks": "^2.13.1",
+        "typescript": "~6.0.3",
+        "vite": "^8.1.0",
+        "vitest": "^4.1.9",
+        "wrangler": "^4.105.0"
+    },
+    "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a"
+}

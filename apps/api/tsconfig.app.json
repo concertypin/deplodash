@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.cache/app.tsbuildinfo",
+        "lib": ["ESNext", "DOM", "DOM.Iterable"],
+        "types": ["vite/client", "@cloudflare/vitest-pool-workers/types"]
+    },
+    "include": ["src", "worker-configuration.d.ts"],
+    "extends": "./tsconfig.base.json"
+}

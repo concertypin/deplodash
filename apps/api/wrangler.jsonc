@@ -1,0 +1,54 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "upload_source_maps": true,
+    "name": "deplodash",
+    "compatibility_date": "2026-03-17",
+    "main": "./src/index.ts",
+    "assets": {
+        "directory": "../web/dist",
+        "not_found_handling": "single-page-application",
+    },
+    "send_metrics": false,
+    "observability": {
+        "enabled": true,
+    },
+    "vars": {
+        "GITHUB_CLIENT_ID": "Iv23li3WmDEd5eJbm4fO",
+        "CALLBACK_URL": "https://deplodash.condev.workers.dev/callback",
+        "GITHUB_APP_ID": "4054947",
+    },
+    "secrets": {
+        "required": [
+            "GITHUB_CLIENT_SECRET",
+            "ENCRYPTION_SECRET",
+            "GITHUB_APP_PRIVATE_KEY",
+        ],
+    },
+    "kv_namespaces": [
+        {
+            "binding": "KV",
+            "id": "7970e6b1d4a349ca8084b7011f4ac53a",
+        },
+    ],
+    "ratelimits": [
+        {
+            "name": "TOKEN_RATE_LIMITER",
+            "namespace_id": "157473395730",
+            "simple": {
+                "limit": 10,
+                "period": 10,
+            },
+        },
+    ],
+    "env": {
+        "prod": {
+            "name": "deplodash",
+            "kv_namespaces": [
+                {
+                    "binding": "KV",
+                    "id": "7970e6b1d4a349ca8084b7011f4ac53a",
+                },
+            ],
+        },
+    },
+}
