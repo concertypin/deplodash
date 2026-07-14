@@ -58,7 +58,7 @@ jobs:
 
       - name: Install Playwright browsers
         if: ${{ !cancelled() }}
-        run: pnpm --filter @deplodash/web exec playwright install chromium 2>&1 || echo "Playwright install skipped"
+        run: pnpm --filter @deplodash/web exec playwright install chromium --with-deps 2>&1
 
       - name: Run tests
         run: pnpm run test --reporter=blob --coverage.enabled --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
@@ -69,9 +69,7 @@ jobs:
         with:
           name: blob-report-${{ matrix.shardIndex }}
           path: |
-            apps/api/.vitest-reports/*
-            apps/web/.vitest-reports/*
-            .vitest-reports/*
+            **/.vitest-reports/
           include-hidden-files: true
           retention-days: 1
   merge-reports:
@@ -91,16 +89,22 @@ jobs:
       - name: Download blob reports from GitHub Actions Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: .vitest-reports
+          path: .
           pattern: blob-report-*
           merge-multiple: true
 
+      - name: Collect all blob reports for merge
+        run: |
+          mkdir -p .vitest-reports
+          find . -path '*/\.vitest-reports/*' -name 'blob*.json' -exec cp {} .vitest-reports/ \;
+
       - name: Merge reports
-        run: pnpm --filter @deplodash/api exec vitest --merge-reports --reporter=github-actions --reporter=default --coverage.reporter=text --coverage.reporter=json-summary
+        run: pnpm --filter @deplodash/api exec vitest --merge-reports=../../.vitest-reports --reporter=github-actions --reporter=default --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Update Coverage Status
         if: ${{ github.event_name == 'pull_request' && always()}}
         uses: concertypin/action/report-vitest-coverage@master
         with:
+          json-file: apps/api/coverage/coverage-summary.json
           threshold: 20
 
