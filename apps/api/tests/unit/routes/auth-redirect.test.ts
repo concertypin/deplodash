@@ -18,7 +18,6 @@ const BASE_ENV: HonoEnv["Bindings"] = {
     TOKEN_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 
-
 describe("GET /auth/github", () => {
     beforeEach(() => {
         resetKeyCache();

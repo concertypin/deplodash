@@ -54,7 +54,6 @@ describe("route.ts - GET /auth/github", () => {
     });
 });
 
-
 describe("route.ts - GET /callback", () => {
     it("returns 400 when code and state are missing", async () => {
         const resp = await client.callback.$get();

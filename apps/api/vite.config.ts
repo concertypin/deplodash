@@ -9,7 +9,12 @@ type Config = Required<UserConfig>;
 const isVitest = typeof process.env.VITEST !== "undefined";
 
 const ignoredDir = [
-    "node_modules", "dist", "coverage", ".wrangler", ".git", "dist-ts",
+    "node_modules",
+    "dist",
+    "coverage",
+    ".wrangler",
+    ".git",
+    "dist-ts",
 ].map((dir) => `**/${dir}/**`);
 
 const resolve: Config["resolve"] = {

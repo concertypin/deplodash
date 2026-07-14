@@ -8,7 +8,8 @@ if (!token) {
     process.exit(1);
 }
 
-const secret = process.env.ENCRYPTION_SECRET ?? "dev-secret-key-1234567890123456";
+const secret =
+    process.env.ENCRYPTION_SECRET ?? "dev-secret-key-1234567890123456";
 
 // ── Key derivation (matches apps/api/src/crypto.ts) ────────────────────────
 const salt = new TextEncoder().encode("deploy-key-dashboard-v1");

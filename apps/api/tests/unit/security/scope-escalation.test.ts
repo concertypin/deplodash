@@ -51,7 +51,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
 
-        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET!);
+        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET);
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
@@ -88,7 +88,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
 
-        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET!);
+        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET);
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
@@ -127,7 +127,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
 
-        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET!);
+        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET);
         const encrypted = await encryptWith(
             key,
             JSON.stringify({

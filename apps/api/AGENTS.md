@@ -54,6 +54,7 @@ Set in `.dev.vars` for local dev, or via `wrangler secret put` / Cloudflare dash
 | -------------------- | ------------------------------------------------ |
 | `KV`                 | Cloudflare KV namespace (consent, tokens, cache) |
 | `TOKEN_RATE_LIMITER` | Rate Limiting for /api/token (100 req/60s)       |
+
 ## Development Commands
 
 ```bash
@@ -78,6 +79,7 @@ cd apps/api && pnpm test
 # Format/Lint backend
 cd apps/api && pnpm format && pnpm lint
 ```
+
 ## Coding Standards
 
 If you can't access the project's convention, such as hono, typescript, typescript-schema, ask user for adding MCP server.

@@ -26,7 +26,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                 .use("*", sessionMiddleware())
                 .route("/api/consent", consentRouter);
 
-            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET!);
+            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
             const encrypted = await encryptWith(
                 key,
                 JSON.stringify({
@@ -63,7 +63,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                 .use("*", sessionMiddleware())
                 .route("/api/consent", consentRouter);
 
-            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET!);
+            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
             const encrypted = await encryptWith(
                 key,
                 JSON.stringify({
@@ -98,7 +98,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
 
-        const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET!);
+        const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
         const encrypted = await encryptWith(
             key,
             JSON.stringify({

@@ -11,7 +11,8 @@
         "./*.mjs",
         // dotfiles
         "./.simple-git-hooks.mjs",
-        "scripts/**/*.ts"
+        "scripts/**/*.ts",
+        "scripts/**/*.mjs"
     ],
     "extends": "./tsconfig.base.json"
 }
