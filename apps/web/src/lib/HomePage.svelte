@@ -35,8 +35,9 @@
 
         return { kind: "dashboard", data: { user, consents } };
     }
-
     let error = $state<string | null>(null);
+
+    const route = `POST /api/token\n{ "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" }\nAuthorization: Bearer <agent-token>`;
 
     async function revokeConsent(item: ConsentItem) {
         try {
@@ -58,25 +59,27 @@
 </script>
 
 {#await load()}
-    <div class="min-h-screen flex items-center justify-center bg-gray-50">
-        <span class="text-gray-500">Loading...</span>
+    <div
+        class="min-h-screen flex items-center justify-center bg-base-200"
+        role="status"
+    >
+        <span class="text-base-content/60">Loading...</span>
     </div>
 {:then result}
     {#if result.kind === "login"}
         <div
-            class="min-h-screen flex flex-col items-center justify-center bg-gray-50"
+            class="min-h-screen flex flex-col items-center justify-center bg-base-200"
         >
             <div class="max-w-md w-full px-6 text-center">
-                <h1 class="text-4xl font-bold text-gray-900 mb-4">Deplodash</h1>
-                <p class="text-gray-600 mb-8">
+                <h1 class="text-4xl font-bold text-base-content mb-4">
+                    Deplodash
+                </h1>
+                <p class="text-base-content/70 mb-8">
                     Token Service for AI Agents — Issue scoped GitHub
                     Installation Tokens to AI agents for git push and API
                     access.
                 </p>
-                <a
-                    href="/auth/github"
-                    class="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium"
-                >
+                <a href="/auth/github" class="btn btn-neutral">
                     <GithubLogoIcon size={20} weight="fill" />
                     Login with GitHub
                 </a>
@@ -84,10 +87,10 @@
         </div>
     {:else}
         {@const { user, consents } = result.data}
-        <div class="min-h-screen bg-gray-50">
+        <div class="min-h-screen bg-base-200">
             <!-- Navbar -->
             <nav
-                class="bg-gray-900 text-white px-6 py-3 flex items-center justify-between"
+                class="bg-neutral text-neutral-content px-6 py-3 flex items-center justify-between"
             >
                 <div class="flex items-center gap-3">
                     <span class="text-xl font-bold">Deplodash</span>
@@ -103,7 +106,7 @@
                     <span class="text-sm">{user.name ?? user.login}</span>
                     <a
                         href="/logout"
-                        class="text-sm text-gray-400 hover:text-white transition-colors"
+                        class="text-sm text-neutral-content/60 hover:text-neutral-content transition-colors"
                     >
                         Logout
                     </a>
@@ -113,38 +116,30 @@
             <div class="max-w-6xl mx-auto px-6 py-8">
                 <!-- Welcome -->
                 <div class="mb-8">
-                    <h2 class="text-2xl font-bold text-gray-900">
+                    <h2 class="text-2xl font-bold text-base-content">
                         Welcome, {user.name ?? user.login}
                     </h2>
-                    <p class="text-gray-600 mt-1">
+                    <p class="text-base-content/70 mt-1">
                         Manage your authorized repositories and agent tokens.
                     </p>
                 </div>
 
                 <!-- Quick Start -->
                 <div
-                    class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8"
+                    class="bg-base-100 rounded-box shadow-sm border border-base-200 p-6 mb-8"
                 >
-                    <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                    <h3 class="text-lg font-semibold text-base-content mb-2">
                         Quick Start
                     </h3>
-                    <p class="text-gray-600 text-sm mb-3">
+                    <p class="text-base-content/70 text-sm mb-3">
                         Request a token for any repository by calling:
                     </p>
-                    <pre
-                        class="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto text-sm">
-                        <code
-                            >POST /api/token
-&#123; "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" &#125;
-Authorization: Bearer &lt;agent-token&gt;</code
-                        >
-                    </pre>
+                    <pre class="bg-neutral text-neutral-content rounded-box p-4 overflow-x-auto text-sm"><code>{route}</code></pre>
                 </div>
-
-                <!-- Error display -->
                 {#if error}
                     <div
-                        class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6"
+                        class="bg-error/10 border border-error/20 text-error rounded-box p-4 mb-6"
+                        role="alert"
                     >
                         {error}
                     </div>
@@ -152,14 +147,14 @@ Authorization: Bearer &lt;agent-token&gt;</code
 
                 <!-- Consents -->
                 <div
-                    class="bg-white rounded-lg shadow-sm border border-gray-200 p-6"
+                    class="bg-base-100 rounded-box shadow-sm border border-base-200 p-6"
                 >
-                    <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                    <h3 class="text-lg font-semibold text-base-content mb-4">
                         Authorized Repositories
                     </h3>
 
                     {#if consents.length === 0}
-                        <div class="text-center py-8 text-gray-500">
+                        <div class="text-center py-8 text-base-content/60">
                             <p class="text-lg mb-2">
                                 No repositories authorized yet
                             </p>
@@ -170,43 +165,32 @@ Authorization: Bearer &lt;agent-token&gt;</code
                         </div>
                     {:else}
                         <div class="overflow-x-auto">
-                            <table class="w-full text-left">
+                            <table class="table">
                                 <thead>
-                                    <tr
-                                        class="border-b border-gray-200 text-sm text-gray-500"
-                                    >
-                                        <th class="pb-2 font-medium"
-                                            >Repository</th
-                                        >
-                                        <th class="pb-2 font-medium">Scopes</th>
-                                        <th class="pb-2 font-medium">Granted</th
-                                        >
-                                        <th class="pb-2 font-medium"></th>
+                                    <tr>
+                                        <th>Repository</th>
+                                        <th>Scopes</th>
+                                        <th>Granted</th>
+                                        <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {#each consents as item}
-                                        <tr class="border-b border-gray-100">
-                                            <td
-                                                class="py-3 text-sm font-medium text-gray-900"
+                                    {#each consents as item (item.repo + (item.agent_id ?? ""))}
+                                        <tr>
+                                            <td class="font-medium"
                                                 >{item.repo}</td
                                             >
-                                            <td
-                                                class="py-3 text-sm text-gray-600"
-                                                >{item.scopes}</td
-                                            >
-                                            <td
-                                                class="py-3 text-sm text-gray-500"
-                                            >
+                                            <td>{item.scopes}</td>
+                                            <td>
                                                 {new Date(
                                                     item.granted_at
                                                 ).toLocaleDateString()}
                                             </td>
-                                            <td class="py-3 text-right">
+                                            <td class="text-right">
                                                 <button
                                                     onclick={() =>
                                                         revokeConsent(item)}
-                                                    class="text-sm text-red-600 hover:text-red-800 transition-colors"
+                                                    class="text-error hover:text-error/80 transition-colors"
                                                 >
                                                     Revoke
                                                 </button>
@@ -222,33 +206,33 @@ Authorization: Bearer &lt;agent-token&gt;</code
                 <!-- Resources -->
                 <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div
-                        class="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+                        class="bg-base-100 rounded-box shadow-sm border border-base-200 p-4"
                     >
-                        <h4 class="font-semibold text-gray-900 mb-1">
+                        <h4 class="font-semibold text-base-content mb-1">
                             API Documentation
                         </h4>
-                        <p class="text-sm text-gray-600 mb-2">
+                        <p class="text-sm text-base-content/70 mb-2">
                             View the full OpenAPI specification.
                         </p>
                         <a
                             href="/docs"
-                            class="text-sm text-blue-600 hover:text-blue-800"
+                            class="text-sm text-primary hover:text-primary/80"
                         >
                             Open API Docs &rarr;
                         </a>
                     </div>
                     <div
-                        class="bg-white rounded-lg shadow-sm border border-gray-200 p-4"
+                        class="bg-base-100 rounded-box shadow-sm border border-base-200 p-4"
                     >
-                        <h4 class="font-semibold text-gray-900 mb-1">
+                        <h4 class="font-semibold text-base-content mb-1">
                             LLM Guide
                         </h4>
-                        <p class="text-sm text-gray-600 mb-2">
+                        <p class="text-sm text-base-content/70 mb-2">
                             Documentation for LLM agents.
                         </p>
                         <a
                             href="/llms.txt"
-                            class="text-sm text-blue-600 hover:text-blue-800"
+                            class="text-sm text-primary hover:text-primary/80"
                         >
                             View llms.txt &rarr;
                         </a>
@@ -258,7 +242,7 @@ Authorization: Bearer &lt;agent-token&gt;</code
         </div>
     {/if}
 {:catch err}
-    <div class="min-h-screen flex items-center justify-center bg-gray-50">
-        <div class="text-red-600">Error: {err.message}</div>
+    <div class="min-h-screen flex items-center justify-center bg-base-200">
+        <div class="text-error" role="alert">Error: {err.message}</div>
     </div>
 {/await}

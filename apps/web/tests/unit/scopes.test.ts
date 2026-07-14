@@ -58,7 +58,9 @@ describe("scopeCategories", () => {
     });
 
     it("should not have duplicate scope ids across categories", () => {
-        const allIds = scopeCategories.flatMap((c) => c.scopes.map((s) => s.id));
+        const allIds = scopeCategories.flatMap((c) =>
+            c.scopes.map((s) => s.id)
+        );
         expect(new Set(allIds).size).toBe(allIds.length);
     });
 });

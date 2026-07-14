@@ -73,6 +73,7 @@ export default defineConfig([
             "@typescript-eslint/require-await": "off",
             "@typescript-eslint/unbound-method": "off",
             "svelte/no-useless-children-snippet": "warn",
+            "no-undef": "off",
             "no-debugger": isCI ? "error" : "warn",
             "no-console": "warn",
         },
