@@ -103,4 +103,22 @@ describe("TokenService — consent", () => {
             expect(consents[0]!.repo).toBe("owner/repo");
         });
     });
+
+    it("includes granted_at for every consent entry to ensure unique each-block keys", async () => {
+        await service.recordConsent("agent-a", "owner/repo", ["contents:read"]);
+        await service.recordConsent("agent-b", "owner/repo", ["contents:read"]);
+
+        const consents = await service.listConsents();
+        expect(consents).toHaveLength(2);
+        for (const entry of consents) {
+            expect(entry.granted_at).toBeTruthy();
+            expect(typeof entry.granted_at).toBe("string");
+        }
+
+        // Key composite must be unique for entries with the same repo + agent_id
+        const keys = consents.map(
+            (e) => `${e.repo}|${e.agent_id ?? ""}|${e.granted_at}`
+        );
+        expect(new Set(keys).size).toBe(keys.length);
+    });
 });
