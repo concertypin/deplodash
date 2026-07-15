@@ -12,6 +12,8 @@ export type { AppType };
  * Main entry point — mounts logger, all routes, and OpenAPI/Scalar docs.
  */
 
+const apiPathPattern = /^\/api(?:\/|$)/i;
+
 const app = new Hono<HonoEnv>().use("*", logger()).route("/", router);
 
 // ── OpenAPI documentation ─────────────────────────────────────────────────
@@ -40,5 +42,19 @@ app.get(
         url: "/openapi.json",
     })
 );
+
+app.notFound((c) => {
+    const pathname = c.req.path;
+    if (
+        apiPathPattern.test(pathname) ||
+        (c.req.method !== "GET" && c.req.method !== "HEAD")
+    ) {
+        return c.text("Not Found", 404);
+    }
+
+    const assets = c.env.ASSETS;
+    if (!assets) return c.text("Static assets binding unavailable", 500);
+    return assets.fetch(c.req.raw);
+});
 
 export default app;

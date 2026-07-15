@@ -21,7 +21,7 @@
 **수정 내용**:
 
 - Cloudflare 네이티브 `ratelimit` 바인딩 사용 (`TOKEN_RATE_LIMITER`, simple: 100 req/60s)
-- `wrangler.jsonc`에 `ratelimits` 설정 추가
+- `wrangler.json`에 `ratelimits` 설정 추가
 - `types.ts`에 `TOKEN_RATE_LIMITER?: RateLimit` 타입 추가 (optional — dev/test 대응)
 - `token.ts`에서 agent_id 기준 rate limit 체크 — 초과시 429 응답
 - `Env` 타입에서 optional 처리 (guard로 안전하게 fallback)

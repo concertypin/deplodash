@@ -41,6 +41,12 @@ export type Env = {
      */
     GITHUB_APP_PRIVATE_KEY: string;
     /**
+     * Cloudflare static assets binding used after no Hono route matches.
+     */
+    ASSETS?: {
+        fetch: typeof fetch;
+    };
+    /**
      * Cloudflare Rate Limiting binding for /api/token endpoint.
      * Optional — rate limiting is a best-effort guard and gracefully skipped
      * when the binding is not available (e.g., local dev, test environments).

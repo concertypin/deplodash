@@ -3,7 +3,7 @@
  *
  * Note: KV is NOT mocked here — use `import { env } from "cloudflare:workers"`
  * in test files to access the real in-memory KV provided by the test pool
- * (configured via wrangler.jsonc's `kv_namespaces` binding).
+ * (configured via wrangler.json's `kv_namespaces` binding).
  */
 
 import { assert, expect, vi } from "vitest";

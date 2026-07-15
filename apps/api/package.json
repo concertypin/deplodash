@@ -16,7 +16,7 @@
     "scripts": {
         "dev": "vite dev",
         "build": "vite build",
-        "postbuild": "node -e \"const fs=require('fs'),p='dist/deplodash/wrangler.json',c=JSON.parse(fs.readFileSync(p,'utf8'));c.assets={directory:'../../../web/dist',not_found_handling:'single-page-application'};fs.writeFileSync(p,JSON.stringify(c))\"",
+        "postbuild": "node scripts/configure-worker-assets.mjs",
         "cf-typegen": "wrangler types --env-interface CloudflareBindings",
         "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
         "lint": "pnpm run lint:oxlint --fix",
