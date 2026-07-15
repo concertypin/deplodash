@@ -31,6 +31,9 @@ const requestTokenSchema = z.object({
             "Invalid repository format"
         ),
     scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
+}).transform(({ repo, scopes }) => {
+    const [owner, name] = repo.split("/");
+    return { repo, owner: owner!, name: name!, scopes };
 });
 
 const tokenResponseSchema = z.object({
@@ -113,7 +116,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
     }),
     validator("json", requestTokenSchema),
     async (c) => {
-        const { repo, scopes } = c.req.valid("json");
+        const { repo, owner, name, scopes } = c.req.valid("json");
 
         // Check if GitHub App is configured
         const appId = c.env.GITHUB_APP_ID;
@@ -129,7 +132,6 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
         try {
             const gh = new GitHubApp(appId, privateKey, c.env.KV);
-            const [owner, name] = repo.split("/") as [string, string];
             const tokenService = new TokenService(c.env.KV);
             const agentId = c.get("agent_id")!;
 

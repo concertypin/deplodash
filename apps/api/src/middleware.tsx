@@ -3,10 +3,20 @@ import type { MiddlewareHandler } from "hono";
 import { decryptWith, encryptWith, getOrInitKey } from "@/crypto";
 import type { HonoEnv, SessionPayload } from "@/types";
 import { GitHubClient } from "@/github";
+import * as z from "zod";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 export const COOKIE_NAME = "session";
+// ─── Session Schema ──────────────────────────────────────────────────────────
+
+const sessionSchema = z.object({
+    accessToken: z.string(),
+    refreshToken: z.string(),
+    accessExpiresAt: z.number(),
+    refreshExpiresAt: z.number(),
+});
+
 export const MAX_AGE_SECS = 30 * 24 * 3600; // 30 days
 
 // ─── Session cookie decryption + auto-refresh middleware ─────────────────────
@@ -21,7 +31,7 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
             if (plain) {
                 let session: SessionPayload | null = null;
                 try {
-                    session = JSON.parse(plain) as SessionPayload;
+                    session = sessionSchema.parse(JSON.parse(plain));
                 } catch {
                     // Legacy format: just a plain access_token string
                     c.set("gh_token", plain);
