@@ -115,7 +115,7 @@ pnpm exec wrangler secret put ENCRYPTION_SECRET
 pnpm exec wrangler secret put GITHUB_APP_ID
 pnpm exec wrangler secret put GITHUB_APP_PRIVATE_KEY
 
-# Update KV namespace ID in wrangler.jsonc, then deploy
+# Update KV namespace ID in apps/api/wrangler.json, then deploy
 pnpm deploy
 ```
 
