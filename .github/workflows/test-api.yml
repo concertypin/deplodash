@@ -1,0 +1,33 @@
+name: Tests (API)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  api-tests:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm Environment
+        uses: concertypin/action/pnpm-install@master
+
+      - name: Run API tests
+        run: pnpm --filter @deplodash/api exec vitest run --reporter=github-actions --reporter=default --coverage.enabled --coverage.reporter=text --coverage.reporter=json-summary
+
+      - name: Update Coverage Status
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: concertypin/action/report-vitest-coverage@master
+        with:
+          json-file: apps/api/coverage/coverage-summary.json
+          threshold: 20

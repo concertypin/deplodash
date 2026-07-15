@@ -1,0 +1,82 @@
+name: Tests (Web)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  web-tests:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2]
+        shardTotal: [2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm Environment
+        uses: concertypin/action/pnpm-install@master
+
+      - name: Install Playwright browsers
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @deplodash/web exec playwright install chromium --with-deps 2>&1
+
+      - name: Run web tests
+        run: pnpm --filter @deplodash/web exec vitest run --reporter=blob --coverage.enabled --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: blob-report-web-${{ matrix.shardIndex }}
+          path: |
+            apps/web/.vitest-reports/
+          include-hidden-files: true
+          retention-days: 1
+
+  merge-reports:
+    if: ${{ !cancelled() }}
+    needs: [web-tests]
+    timeout-minutes: 3
+    permissions:
+      pull-requests: write
+      statuses: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm Environment
+        uses: concertypin/action/pnpm-install@master
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: .
+          pattern: blob-report-web-*
+          merge-multiple: true
+
+      - name: Collect all blob reports for merge
+        run: |
+          mkdir -p .vitest-reports
+          find . -path '*/\.vitest-reports/*' -name 'blob*.json' -exec cp {} .vitest-reports/ \;
+
+      - name: Merge reports
+        run: pnpm --filter @deplodash/web exec vitest --merge-reports=../../.vitest-reports --reporter=github-actions --reporter=default --coverage.reporter=text --coverage.reporter=json-summary
+
+      - name: Update Coverage Status
+        if: ${{ github.event_name == 'pull_request' && always() }}
+        uses: concertypin/action/report-vitest-coverage@master
+        with:
+          json-file: apps/web/coverage/coverage-summary.json
+          threshold: 20
