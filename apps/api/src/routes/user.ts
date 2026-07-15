@@ -1,3 +1,17 @@
+import { listAgentTokens, registerAgentToken, revokeAgentToken, verifyAgentToken } from "@/middleware/agent-auth";
+import { randomBytes } from "@/crypto";
+import { validator } from "hono-openapi";
+import { z } from "zod";
+
+const createAgentSchema = z.object({
+    agent_id: z.string().min(1, "Agent ID is required").max(64, "Agent ID too long"),
+    label: z.string().max(128, "Label too long").optional(),
+});
+
+const revokeAgentSchema = z.object({
+    token: z.string().min(1, "Token is required"),
+});
+
 /**
  * User token API — returns the authenticated GitHub user's OAuth token,
  * user profile, and consent list.
@@ -51,4 +65,77 @@ export const userRouter = new Hono<HonoEnv>()
         const consents = await tokenService.listConsents(user.login);
 
         return c.json({ consents });
-    });
+    })
+
+    // Agent token management routes
+    .get("/agent/list", sessionMiddleware(), authGuard(), async (c) => {
+        const client = c.get("client")!;
+        const user = await client.getUser();
+
+        const allTokens = await listAgentTokens(c.env.KV);
+        const userTokens = allTokens.filter(
+            (t) => t.info.created_by === user.login,
+        );
+
+        return c.json({
+            status: "ok",
+            tokens: userTokens.map((t) => ({
+                token: t.token,
+                agent_id: t.info.agent_id,
+                label: t.info.label,
+                created_at: t.info.created_at,
+            })),
+        });
+    })
+
+    .post(
+        "/agent/create",
+        sessionMiddleware(),
+        authGuard(),
+        validator("json", createAgentSchema),
+        async (c) => {
+            const client = c.get("client")!;
+            const user = await client.getUser();
+            const { agent_id, label } = c.req.valid("json");
+
+            const token = randomBytes(24);
+            await registerAgentToken(
+                c.env.KV,
+                token,
+                agent_id,
+                label,
+                user.login,
+            );
+
+            return c.json({
+                status: "ok",
+                token,
+                info: {
+                    agent_id,
+                    label: label ?? agent_id,
+                    created_at: new Date().toISOString(),
+                    created_by: user.login,
+                },
+            });
+        },
+    )
+
+    .post(
+        "/agent/revoke",
+        sessionMiddleware(),
+        authGuard(),
+        validator("json", revokeAgentSchema),
+        async (c) => {
+            const client = c.get("client")!;
+            const user = await client.getUser();
+            const { token } = c.req.valid("json");
+
+            const info = await verifyAgentToken(c.env.KV, token);
+            if (!info || info.created_by !== user.login) {
+                return c.json({ error: "Forbidden or token not found" }, 403);
+            }
+
+            await revokeAgentToken(c.env.KV, token);
+            return c.json({ status: "ok" });
+        },
+    );

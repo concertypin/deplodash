@@ -10,7 +10,7 @@ findings that are not bugs — for future reviewers and agents.
 **Status**: Intentional.
 
 Agent tokens are opaque strings stored in KV without an expiry mechanism.
-They remain valid until explicitly revoked via the admin API.
+They remain valid until explicitly revoked via the user dashboard or CLI.
 
 The `granted_by` field (GitHub login of the user who approved) is now also
 recorded and enforced on revocation (see D-001 below).
@@ -44,17 +44,18 @@ The `granted_by` field (GitHub login of the user who approved) is now also
 recorded and enforced on revocation (see D-001 below).
 
 ---
+## Agent Token Revocation (src/routes/user.ts)
 
-## Admin Revoke Audit Trail (src/routes/admin.ts)
+**Status**: User-managed (dashboard).
 
-**Status**: Mitigated via RBAC (still no audit log).
+Users can revoke their own tokens via the dashboard. Revocation is enforced
+by ownership check: only the user who created the token (`created_by`) can
+revoke it. Cross-user revocation returns 403.
 
-Token revocation via the admin API lacks logging of who performed the action.
-This is an operational gap, not a security boundary bypass:
+The CLI script (`scripts/agent-token-manager.ts`) can still bypass ownership
+for emergency revocation by an operator with KV access.
 
-- Only users listed in `GITHUB_ADMIN_USERS` can revoke tokens (RBAC enforced)
-- Cloudflare Workers logs capture HTTP-level request metadata
-- Audit logging is desirable for compliance but does not change the threat model
+Cloudflare Workers logs capture HTTP-level request metadata for audit.
 
 ---
 

@@ -12,7 +12,7 @@ Request token issuance with a bearer token in the Authorization header:
 Authorization: Bearer <agent_token>
 ```
 
-Agent tokens are long-lived strings stored in Cloudflare KV. Ask the deplodash admin to provision one.
+Agent tokens are long-lived strings stored in Cloudflare KV. Provision one from the user dashboard (Login → Issue Agent Token).
 
 ### Session auth for user pages and consent
 
