@@ -15,7 +15,7 @@ repository, deplodash creates it automatically.
 
 - **Monorepo** (pnpm workspace) with `apps/api` and `apps/web`
 - **`apps/api/src/`** — Backend application (Hono on Cloudflare Workers)
-    - **`routes/`** — Route handlers (token, consent, auth, oauth, llms, admin, user)
+    - **`routes/`** — Route handlers (token, consent, auth, oauth, llms, user)
     - **`middleware/`** — Session cookie auth, Bearer token auth for agents
     - Core modules: `crypto.ts`, `github-app.ts`, `github.ts`, `token/service.ts`, `helpers.ts`, `types.ts`, `errors.ts`
 - **`apps/web/src/`** — Frontend application (Svelte 5 SPA with Hono RPC)
@@ -46,7 +46,6 @@ Set in `.dev.vars` for local dev, or via `wrangler secret put` / Cloudflare dash
 | Variable             | Description                             |
 | -------------------- | --------------------------------------- |
 | `GITHUB_TOKEN`       | Direct GitHub PAT (skips OAuth)         |
-| `GITHUB_ADMIN_USERS` | Comma-separated list of admin usernames |
 
 ### Cloudflare Bindings
 
@@ -103,8 +102,8 @@ Configuration is in `wrangler.jsonc`.
 
 ## Known Issues / TODOs
 
-- **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop for admin tools.
-- **Agent token management** — No admin UI or API to register/revoke agent tokens. Currently must be done via direct KV writes or wrangler.
+- **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop.
+- **Agent token management** — Users can issue/revoke agent tokens from their dashboard (`HomePage.svelte`). CLI script at `scripts/agent-token-manager.ts` for bypass provisioning.
 - **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` batches KV gets (50 at a time) for performance but still does not handle `kv.list()` cursor-based pagination. At most 1000 consent records returned per page.
 - **`github-app.ts` `resolveInstallationId`** — Does not cache installation IDs across requests. Each request to a different owner triggers a fresh GitHub API call. Consider adding KV-based caching with TTL.
 - **`api.ts`** — Empty legacy v1 API placeholder. Consider removing if not needed.

@@ -6,7 +6,6 @@ import { oauthRouter } from "@/routes/oauth";
 import { consentRouter } from "@/routes/consent";
 import { tokenRouter } from "@/routes/token";
 import { userRouter } from "@/routes/user";
-import { adminRouter } from "@/routes/admin";
 import { llmsRouter } from "@/routes/llms";
 
 /**
@@ -15,25 +14,22 @@ import { llmsRouter } from "@/routes/llms";
  * Mount point hierarchy:
  *   /auth      → auth (OAuth start — /auth/github)
  *   /api       → API token (/api/token)
- *   /api/user  → User API (/api/user/me, /api/user/consents, /api/user/token)
+ *   /api/user  → User API (/api/user/me, /api/user/consents, /api/user/token, /api/user/agent/*)
  *   /api/consent    → Consent API (/api/consent, /api/consent/revoke)
- *   /api/admin → Admin API (/api/admin/agent/list)
  *   (root)     → oauth (/callback, /logout)
  *   /llms.txt  → LLM agent documentation
  *
- * sessionMiddleware (cookie decryption) is scoped only to routes that need it
- * — OAuth routes, admin routes, consent routes, and user routes. token API and
+ * — OAuth routes, consent routes, and user routes. token API and
  * /llms.txt use Bearer token or no auth and don't need cookie-based sessions.
  */
 export const router = new Hono<HonoEnv>()
-    // Routes requiring session cookie (OAuth, admin, consent, user)
+    // Routes requiring session cookie (OAuth, consent, user)
     .route(
         "/",
         new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/auth", authRouter)
             .route("/", oauthRouter)
-            .route("/api/admin", adminRouter)
             .route("/api/consent", consentRouter)
             .route("/api/user", userRouter)
     )

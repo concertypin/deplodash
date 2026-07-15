@@ -14,12 +14,27 @@ import { z } from "zod";
 /** KV key prefix for agent tokens. */
 const AGENT_PREFIX = "agent_tokens:";
 
-/** Runtime schema for AgentInfo stored in KV. */
+/**
+ * Runtime schema for AgentInfo stored in KV.
+ */
 const agentInfoSchema = z.object({
     agent_id: z.string(),
     label: z.string(),
     created_at: z.string(),
+    created_by: z.string().optional(),
 });
+
+/** Convert a Zod-parsed token value to AgentInfo. */
+function toAgentInfo(
+    data: z.infer<typeof agentInfoSchema>,
+): AgentInfo {
+    return {
+        agent_id: data.agent_id,
+        label: data.label,
+        created_at: data.created_at,
+        ...(data.created_by ? { created_by: data.created_by } : {}),
+    };
+}
 
 /**
  * Verify a bearer token against Cloudflare KV.
@@ -34,23 +49,25 @@ export async function verifyAgentToken(
     if (!value) return null;
     const parsed = agentInfoSchema.safeParse(value);
     if (!parsed.success) return null;
-    return parsed.data;
+    return toAgentInfo(parsed.data);
 }
 
 /**
- * Register a new agent token in KV (admin use).
+ * Register a new agent token in KV.
  */
 export async function registerAgentToken(
     kv: KVNamespace,
     token: string,
     agentId: string,
-    label?: string
+    label?: string,
+    createdBy?: string
 ): Promise<void> {
     const key = `${AGENT_PREFIX}${token}`;
     const info: AgentInfo = {
         agent_id: agentId,
         label: label ?? agentId,
         created_at: new Date().toISOString(),
+        ...(createdBy ? { created_by: createdBy } : {}),
     };
     await kv.put(key, JSON.stringify(info));
 }
@@ -83,7 +100,7 @@ export async function listAgentTokens(
         if (value) {
             const parsed = agentInfoSchema.safeParse(value);
             if (parsed.success) {
-                result.push({ token, info: parsed.data });
+                result.push({ token, info: toAgentInfo(parsed.data) });
             }
         }
     }
