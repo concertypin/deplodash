@@ -134,12 +134,13 @@ export const consentRouter = new Hono<HonoEnv>()
             ];
             // Parse the originally requested scopes once and reuse for both
             // audit tracking and subset validation.
-            const requestedList: string[] | undefined = typeof requested_scopes === "string"
-                ? requested_scopes
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                : undefined;
+            const requestedList: string[] | undefined =
+                typeof requested_scopes === "string"
+                    ? requested_scopes
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean)
+                    : undefined;
             // Validate that approved scopes are a subset of the originally requested scopes.
             if (requestedList) {
                 const invalidScopes = scopeList.filter(

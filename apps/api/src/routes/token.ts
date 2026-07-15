@@ -23,18 +23,20 @@ import { encryptWith, getOrInitKey } from "@/crypto";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
-const requestTokenSchema = z.object({
-    repo: z
-        .string()
-        .regex(
-            /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
-            "Invalid repository format"
-        ),
-    scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
-}).transform(({ repo, scopes }) => {
-    const [owner, name] = repo.split("/");
-    return { repo, owner: owner!, name: name!, scopes };
-});
+const requestTokenSchema = z
+    .object({
+        repo: z
+            .string()
+            .regex(
+                /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
+                "Invalid repository format"
+            ),
+        scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
+    })
+    .transform(({ repo, scopes }) => {
+        const [owner, name] = repo.split("/");
+        return { repo, owner: owner!, name: name!, scopes };
+    });
 
 const tokenResponseSchema = z.object({
     status: z.literal("ok"),
