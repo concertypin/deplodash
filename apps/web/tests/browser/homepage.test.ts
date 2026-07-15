@@ -26,7 +26,12 @@ describe("HomePage", () => {
     it("renders the login page when API returns 401", async () => {
         // me endpoint returns 401
         mockFetch.mockImplementation((input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
             if (url.includes("/api/user/me")) {
                 return mockFetchOnce({}, 401);
             }
@@ -42,7 +47,12 @@ describe("HomePage", () => {
 
     it("renders the dashboard with agent tokens section", async () => {
         mockFetch.mockImplementation((input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
             if (url.includes("/api/user/me")) {
                 return mockFetchOnce({
                     login: "testuser",
@@ -90,7 +100,12 @@ describe("HomePage", () => {
 
     it("shows empty state when no agent tokens exist", async () => {
         mockFetch.mockImplementation((input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
             if (url.includes("/api/user/me")) {
                 return mockFetchOnce({
                     login: "testuser",
@@ -126,7 +141,12 @@ describe("HomePage", () => {
 
     it("opens the issue token modal when clicking the button", async () => {
         mockFetch.mockImplementation((input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
             if (url.includes("/api/user/me")) {
                 return mockFetchOnce({
                     login: "testuser",
@@ -166,7 +186,12 @@ describe("HomePage", () => {
 
     it("shows agent tokens in the list when present", async () => {
         mockFetch.mockImplementation((input: string | URL | Request) => {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
             if (url.includes("/api/user/me")) {
                 return mockFetchOnce({
                     login: "testuser",

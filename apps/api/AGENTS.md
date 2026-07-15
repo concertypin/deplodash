@@ -43,9 +43,9 @@ Set in `.dev.vars` for local dev, or via `wrangler secret put` / Cloudflare dash
 
 ### Optional (dev/testing)
 
-| Variable             | Description                             |
-| -------------------- | --------------------------------------- |
-| `GITHUB_TOKEN`       | Direct GitHub PAT (skips OAuth)         |
+| Variable       | Description                     |
+| -------------- | ------------------------------- |
+| `GITHUB_TOKEN` | Direct GitHub PAT (skips OAuth) |
 
 ### Cloudflare Bindings
 

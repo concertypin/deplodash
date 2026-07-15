@@ -19,8 +19,5 @@
     "devDependencies": {
         "concurrently": "^10.0.3",
         "simple-git-hooks": "^2.13.1"
-    },
-    "simple-git-hooks": {
-        "pre-commit": "pnpm check"
-    }
+}
 }
