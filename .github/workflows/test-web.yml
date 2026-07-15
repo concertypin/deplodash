@@ -75,4 +75,4 @@ jobs:
         with:
           json-file: apps/web/coverage/coverage-summary.json
           threshold: 20
-          title: Web Coverage
+          title: Coverage (Web)

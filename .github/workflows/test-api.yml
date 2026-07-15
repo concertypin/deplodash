@@ -32,4 +32,4 @@ jobs:
         with:
           json-file: apps/api/coverage/coverage-summary.json
           threshold: 20
-          title: API Coverage
+          title: Coverage (API)
