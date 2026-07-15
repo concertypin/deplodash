@@ -44,7 +44,7 @@ app.get(
 );
 
 app.notFound((c) => {
-    const { pathname } = new URL(c.req.url);
+    const pathname = c.req.path;
     if (
         apiPathPattern.test(pathname) ||
         (c.req.method !== "GET" && c.req.method !== "HEAD")
