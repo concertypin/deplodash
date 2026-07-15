@@ -104,6 +104,7 @@ describe("TokenService — cache & requestToken", () => {
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
                     agentId: "test-agent",
+                    encryptionSecret: "test-secret-1234567890123456",
                 },
                 () =>
                     Promise.resolve({
@@ -117,6 +118,8 @@ describe("TokenService — cache & requestToken", () => {
             if (result.status !== "needs_consent") return;
             expect(result.url).toContain("/auth/consent");
             expect(result.url).toContain("owner%2Frepo");
+            expect(result.url).toContain("requested_scopes_enc=");
+            expect(result.url).toContain("agent_id=test-agent");
         });
 
         it("returns ok when consent exists", async () => {

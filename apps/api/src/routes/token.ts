@@ -19,6 +19,7 @@ import { bodyLimit } from "hono/body-limit";
 import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
+import { encryptWith, getOrInitKey } from "@/crypto";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ const tokenResponseSchema = z.object({
 const needsConsentResponseSchema = z.object({
     status: z.literal("needs_consent"),
     url: z.string(),
+    /** Encrypted original scope context for integrity verification. */
+    requested_scopes_enc: z.string().optional(),
     /** The scopes the agent requested. */
     requested_scopes: z.array(z.string()).optional(),
     /** Scopes the user has already approved for this repo (if any). */
@@ -162,16 +165,35 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     agentId,
                     repo
                 );
-                const consentUrl =
+
+                // Encrypt the original scope request so consent.ts can verify scope integrity
+                let requested_scopes_enc: string | undefined;
+                if (c.env.ENCRYPTION_SECRET) {
+                    const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
+                    requested_scopes_enc = await encryptWith(
+                        key,
+                        JSON.stringify({
+                            scopes: scopes.join(","),
+                            repo,
+                            agent_id: agentId,
+                        })
+                    );
+                }
+
+                let consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
                     `&scopes=${encodeURIComponent(scopes.join(","))}` +
                     `&agent_id=${encodeURIComponent(agentId)}`;
+                if (requested_scopes_enc) {
+                    consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
+                }
 
                 return c.json(
                     {
                         status: "needs_consent",
                         url: consentUrl,
                         requested_scopes: scopes,
+                        requested_scopes_enc,
                         approved_scopes:
                             approvedScopes.length > 0
                                 ? approvedScopes
@@ -350,8 +372,8 @@ tokenRouter.on(
                 if (finished) return;
                 finished = true;
 
-                clearTimeout(timeoutId as unknown as number);
-                clearInterval(pollIntervalId as unknown as number);
+                clearTimeout(timeoutId);
+                clearInterval(pollIntervalId);
                 removeWaiter();
 
                 if (c.req.raw.signal) {

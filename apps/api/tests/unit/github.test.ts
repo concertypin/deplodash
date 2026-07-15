@@ -363,8 +363,7 @@ describe("GitHubClient", () => {
             );
 
             const callInit = mockFetch.mock.calls[0]?.[1] as
-                | RequestInit
-                | undefined;
+                RequestInit | undefined;
             expect(callInit?.headers).toBeDefined();
             const headers = callInit?.headers as Record<string, string>;
             expect(headers["Content-Type"]).toBe("application/json");

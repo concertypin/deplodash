@@ -42,7 +42,7 @@ export function adminEnv(
     adminUsers: string,
     base: HonoEnv["Bindings"]
 ): HonoEnv["Bindings"] {
-    return { ...base, GITHUB_ADMIN_USERS: adminUsers } as HonoEnv["Bindings"];
+    return { ...base, GITHUB_ADMIN_USERS: adminUsers };
 }
 
 export { resetKeyCache }; // re-export for test files to use in beforeEach

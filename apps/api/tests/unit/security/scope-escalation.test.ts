@@ -5,6 +5,7 @@ import type { HonoEnv } from "@/types";
 import { consentRouter } from "@/routes/consent";
 import { sessionMiddleware } from "@/middleware";
 import { resetKeyCache, encryptWith, getOrInitKey } from "@/crypto";
+import * as z from "zod";
 import { env } from "cloudflare:workers";
 
 const BASE_ENV: HonoEnv["Bindings"] = {
@@ -211,5 +212,45 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
         expect(json).toEqual({
             error: "Invalid consent request. Please try again from the agent's link.",
         });
+    });
+
+    it("rejects scope escalation (superset scopes approved)", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const key = await getOrInitKey(authEnv.ENCRYPTION_SECRET);
+        const encrypted = await encryptWith(
+            key,
+            JSON.stringify({
+                scopes: "contents:read",
+                repo: "owner/repo",
+                agent_id: "test-agent",
+            })
+        );
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "owner/repo",
+                    scopes: ["contents:read", "issues:write"], // Injected scope!
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encrypted,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(400);
+        const errorResponse = z.object({ error: z.string() });
+        const json = errorResponse.parse(await resp.json());
+        expect(json.error).toContain(
+            "Cannot approve scopes not in the original request"
+        );
     });
 });

@@ -139,6 +139,20 @@ export const consentRouter = new Hono<HonoEnv>()
                       .map((s) => s.trim())
                       .filter(Boolean)
                 : undefined;
+            // Validate that approved scopes are a subset of the originally requested scopes.
+            if (requestedList) {
+                const invalidScopes = scopeList.filter(
+                    (s) => !requestedList.includes(s)
+                );
+                if (invalidScopes.length > 0) {
+                    return c.json(
+                        {
+                            error: `Cannot approve scopes not in the original request: ${invalidScopes.join(", ")}`,
+                        },
+                        400
+                    );
+                }
+            }
             // Resolve the authenticated GitHub user for audit trail
             const ghClient = c.get("client")!;
             let grantedBy: string;

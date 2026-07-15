@@ -6,12 +6,13 @@
 
 import { ConsentService } from "@/token/consent-service";
 import { getCachedToken, cacheToken } from "@/token/cache";
+import { encryptWith, getOrInitKey } from "@/crypto";
 
 // ─── Result type ─────────────────────────────────────────────────────────────
 
 export type TokenRequestResult =
     | { status: "ok"; token: string; expires_at: string }
-    | { status: "needs_consent"; url: string };
+    | { status: "needs_consent"; url: string; requested_scopes_enc?: string };
 
 // ─── Token Service ───────────────────────────────────────────────────────────
 
@@ -126,12 +127,13 @@ export class TokenService {
             scopes: string[];
             baseUrl: string;
             agentId: string;
+            encryptionSecret?: string;
         },
         getToken: (
             effectiveScopes: string[]
         ) => Promise<{ token: string; expires_at: string }>
     ): Promise<TokenRequestResult> {
-        const { repo, scopes, baseUrl } = params;
+        const { repo, scopes, baseUrl, encryptionSecret } = params;
 
         // 1. Check cache for exact requested scopes
         const cached = await this.getCachedToken(params.agentId, repo, scopes);
@@ -159,10 +161,31 @@ export class TokenService {
                 scopes
             );
             if (!foundScopes) {
-                const consentUrl =
+                let consentUrl =
                     `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                    `&scopes=${encodeURIComponent(scopes.join(","))}`;
-                return { status: "needs_consent", url: consentUrl };
+                    `&scopes=${encodeURIComponent(scopes.join(","))}` +
+                    `&agent_id=${encodeURIComponent(params.agentId)}`;
+
+                let requested_scopes_enc: string | undefined;
+                if (encryptionSecret) {
+                    const key = await getOrInitKey(encryptionSecret);
+                    requested_scopes_enc = await encryptWith(
+                        key,
+                        JSON.stringify({
+                            scopes: scopes.join(","),
+                            repo,
+                            agent_id: params.agentId,
+                        })
+                    );
+                    consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
+                }
+                return {
+                    status: "needs_consent",
+                    url: consentUrl,
+                    ...(requested_scopes_enc !== undefined
+                        ? { requested_scopes_enc }
+                        : {}),
+                };
             }
             effectiveScopes = foundScopes;
         }

@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
+import * as z from "zod";
 import { tokenRouter } from "@/routes/token";
 import { resetKeyCache } from "@/crypto";
 import { env } from "cloudflare:workers";
@@ -44,5 +45,29 @@ describe("POST /api/token (authenticated, needs consent)", () => {
         expect(resp.status).toBe(202);
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("needs_consent");
+    });
+
+    it("returns consent URL with requested_scopes_enc and agent_id when ENCRYPTION_SECRET is configured", async () => {
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:read", "issues:write"],
+                },
+            },
+            { headers: { Authorization: "Bearer test-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const needsConsentSchema = z.object({
+            status: z.literal("needs_consent"),
+            url: z.string(),
+            requested_scopes_enc: z.string().optional(),
+            requested_scopes: z.array(z.string()).optional(),
+            approved_scopes: z.array(z.string()).optional(),
+        });
+        const body = needsConsentSchema.parse(await resp.json());
+        expect(body.url).toContain("requested_scopes_enc=");
+        expect(body.url).toContain("agent_id=test-agent");
+        expect(body.requested_scopes_enc).toBeDefined();
     });
 });
