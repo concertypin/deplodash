@@ -1,0 +1,12 @@
+{
+    "$schema": "../../node_modules/oxlint/configuration_schema.json",
+    "overrides": [
+        {
+            "files": ["**/*.svelte"],
+            "rules": {
+                "prefer-const": "off",
+                "no-unassigned-vars": "off"
+            }
+        }
+    ]
+}

@@ -1,0 +1,56 @@
+{
+    "name": "@deplodash/api",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "license": "Apache-2.0",
+    "author": {
+        "name": "concertypin",
+        "url": "https://github.com/concertypin"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/concertypin/deplodash"
+    },
+    "types": "./src/index.ts",
+    "scripts": {
+        "dev": "vite dev",
+        "build": "vite build",
+        "postbuild": "node -e \"const fs=require('fs'),p='dist/deplodash/wrangler.json',c=JSON.parse(fs.readFileSync(p,'utf8'));c.assets={directory:'../../../web/dist',not_found_handling:'single-page-application'};fs.writeFileSync(p,JSON.stringify(c))\"",
+        "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+        "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
+        "lint": "pnpm run lint:oxlint --fix",
+        "lint:check": "pnpm run lint:oxlint",
+        "lint:oxlint": "oxlint -c oxlint.config.ts . --type-aware --type-check --report-unused-disable-directives-severity=error",
+        "postinstall": "pnpm run cf-typegen",
+        "test": "vitest run",
+        "deploy": "pnpm run build && wrangler deploy",
+        "token": "node scripts/agent-token-manager.ts"
+    },
+    "engines": {
+        "node": ">=24"
+    },
+    "dependencies": {
+        "@hono/standard-validator": "^0.2.3",
+        "@scalar/hono-api-reference": "^0.11.9",
+        "hono": "^4.12.30",
+        "hono-openapi": "^1.3.1",
+        "zod": "^4.4.3"
+    },
+    "devDependencies": {
+        "@cloudflare/vite-plugin": "^1.45.0",
+        "@cloudflare/vitest-pool-workers": "^0.18.5",
+        "@types/node": "^26.1.1",
+        "@vitest/coverage-istanbul": "^4.1.10",
+        "cross-env": "^10.1.0",
+        "globals": "^17.7.0",
+        "oxlint": "^1.74.0",
+        "oxlint-tsgolint": "^0.24.0",
+        "prettier": "^3.9.5",
+        "typescript": "~6.0.3",
+        "vite": "^8.1.4",
+        "vitest": "^4.1.10",
+        "wrangler": "^4.111.0"
+    },
+    "packageManager": "pnpm@10.17.1+sha512.17c560fca4867ae9473a3899ad84a88334914f379be46d455cbf92e5cf4b39d34985d452d2583baf19967fa76cb5c17bc9e245529d0b98745721aa7200ecaf7a"
+}
