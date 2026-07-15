@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   api-tests:
@@ -26,7 +27,7 @@ jobs:
         run: pnpm --filter @deplodash/api exec vitest run --reporter=github-actions --reporter=default --coverage.enabled --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Update Coverage Status
-        if: ${{ github.event_name == 'pull_request' && always() }}
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && always() }}
         uses: concertypin/action/report-vitest-coverage@master
         with:
           json-file: apps/api/coverage/coverage-summary.json

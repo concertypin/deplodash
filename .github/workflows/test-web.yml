@@ -62,20 +62,15 @@ jobs:
       - name: Download blob reports
         uses: actions/download-artifact@v4
         with:
-          path: .
+          path: .vitest-reports
           pattern: blob-report-web-*
           merge-multiple: true
-
-      - name: Collect all blob reports for merge
-        run: |
-          mkdir -p .vitest-reports
-          find . -path '*/\.vitest-reports/*' -name 'blob*.json' -exec cp {} .vitest-reports/ \;
 
       - name: Merge reports
         run: pnpm --filter @deplodash/web exec vitest --merge-reports=../../.vitest-reports --reporter=github-actions --reporter=default --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Update Coverage Status
-        if: ${{ github.event_name == 'pull_request' && always() }}
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && always() }}
         uses: concertypin/action/report-vitest-coverage@master
         with:
           json-file: apps/web/coverage/coverage-summary.json
