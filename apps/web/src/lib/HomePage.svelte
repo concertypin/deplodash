@@ -175,7 +175,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {#each consents as item (item.repo + (item.agent_id ?? ""))}
+                    {#each consents as item (item.repo + "|" + (item.agent_id ?? "") + "|" + item.granted_at)}
                                         <tr>
                                             <td class="font-medium"
                                                 >{item.repo}</td
