@@ -134,6 +134,9 @@ export class TokenService {
         ) => Promise<{ token: string; expires_at: string }>
     ): Promise<TokenRequestResult> {
         const { repo, scopes, baseUrl, encryptionSecret } = params;
+        if (scopes.length === 0) {
+            throw new Error("Scopes list cannot be empty");
+        }
 
         // 1. Check cache for exact requested scopes
         const cached = await this.getCachedToken(params.agentId, repo, scopes);

@@ -68,11 +68,12 @@ export const consentRouter = new Hono<HonoEnv>()
                 const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
                 const decrypted = await decryptWith(key, requested_scopes_enc);
                 if (decrypted === null) throw new Error("Decrypt failed");
-                const ctx = JSON.parse(decrypted) as {
-                    scopes: string;
-                    repo?: string;
-                    agent_id?: string;
-                };
+                const contextSchema = z.object({
+                    scopes: z.string(),
+                    repo: z.string().optional(),
+                    agent_id: z.string().optional(),
+                });
+                const ctx = contextSchema.parse(JSON.parse(decrypted));
                 // Verify repo binding — prevents cross-repo replay
                 if (ctx.repo && ctx.repo !== repo) {
                     throw new Error("Repo mismatch");
@@ -133,7 +134,7 @@ export const consentRouter = new Hono<HonoEnv>()
             ];
             // Parse the originally requested scopes once and reuse for both
             // audit tracking and subset validation.
-            const requestedList: string[] | undefined = requested_scopes
+            const requestedList: string[] | undefined = typeof requested_scopes === "string"
                 ? requested_scopes
                       .split(",")
                       .map((s) => s.trim())
