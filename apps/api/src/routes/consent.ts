@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
 import type { HonoEnv } from "@/types";
+import type { GitHubClient } from "@/github";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
@@ -35,6 +36,28 @@ const revokeSchema = z.object({
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api/consent — relative paths
+
+async function assertApproverCanGrantConsent(
+    ghClient: GitHubClient,
+    username: string,
+    repo: string
+): Promise<void> {
+    const parts = repo.split("/");
+    const owner = parts[0];
+    const name = parts[1];
+    if (!owner || !name) throw new Error("Invalid repository format");
+
+    // 1. If user is an admin on the existing repo, they are authorized.
+    if (await ghClient.checkRepoAdmin(owner, name)) return;
+
+    // 2. If repo doesn't exist, user must own the target namespace or be an org owner.
+    if (owner.toLowerCase() === username.toLowerCase()) return;
+    if (await ghClient.checkOrgAdmin(owner, username)) return;
+
+    throw new Error(
+        `User ${username} lacks administrative authority for repository ${repo}`
+    );
+}
 
 export const consentRouter = new Hono<HonoEnv>()
     .post("/", authGuard(), validator("json", consentSchema), async (c) => {
@@ -66,20 +89,26 @@ export const consentRouter = new Hono<HonoEnv>()
             }
             try {
                 const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
-                const decrypted = await decryptWith(key, requested_scopes_enc);
+                const decrypted = await decryptWith(
+                    key,
+                    requested_scopes_enc,
+                    "consent-request"
+                );
                 if (decrypted === null) throw new Error("Decrypt failed");
-                const contextSchema = z.object({
-                    scopes: z.string(),
-                    repo: z.string().optional(),
-                    agent_id: z.string().optional(),
+                const consentContextSchema = z.object({
+                    version: z.literal(1),
+                    purpose: z.literal("consent-request"),
+                    repo: z.string().min(1),
+                    agent_id: z.string().min(1),
+                    scopes: z.string().min(1),
                 });
-                const ctx = contextSchema.parse(JSON.parse(decrypted));
+                const ctx = consentContextSchema.parse(JSON.parse(decrypted));
                 // Verify repo binding — prevents cross-repo replay
-                if (ctx.repo && ctx.repo !== repo) {
+                if (ctx.repo !== repo) {
                     throw new Error("Repo mismatch");
                 }
-                // Verify agent_id binding when present — prevents cross-agent redirect
-                if (ctx.agent_id && ctx.agent_id !== agent_id) {
+                // Verify agent_id binding — prevents cross-agent redirect
+                if (ctx.agent_id !== agent_id) {
                     throw new Error("Agent mismatch");
                 }
                 requested_scopes = ctx.scopes;
@@ -165,6 +194,20 @@ export const consentRouter = new Hono<HonoEnv>()
                 return c.json(
                     { error: "Failed to verify identity. Please try again." },
                     401
+                );
+            }
+            // Verify the user has administrative authority on the repository
+            try {
+                await assertApproverCanGrantConsent(ghClient, grantedBy, repo);
+            } catch (err: unknown) {
+                return c.json(
+                    {
+                        error:
+                            err instanceof Error
+                                ? err.message
+                                : "Lacks administrative authority for repository",
+                    },
+                    403
                 );
             }
             // Grant all requested scopes — duplicates are handled by TokenService

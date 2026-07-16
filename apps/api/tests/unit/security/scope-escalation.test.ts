@@ -56,10 +56,13 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
                 scopes: "contents:read",
-                repo: "owner/repo",
+                repo: "testuser/repo",
                 agent_id: "test-agent",
-            })
+            }),
+            "consent-request"
         );
 
         const resp = await app.fetch(
@@ -67,7 +70,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                     agent_id: "test-agent",
                     requested_scopes_enc: encrypted,
@@ -93,10 +96,13 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
                 scopes: "contents:read",
                 repo: "victim/repo",
-                agent_id: "agent-a",
-            })
+                agent_id: "test-agent",
+            }),
+            "consent-request"
         );
 
         const postResp = await app.fetch(
@@ -106,7 +112,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 body: JSON.stringify({
                     repo: "attacker/repo",
                     scopes: "contents:read",
-                    agent_id: "agent-a",
+                    agent_id: "test-agent",
                     requested_scopes_enc: encrypted,
                 }),
             }),
@@ -132,10 +138,13 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
                 scopes: "contents:read",
-                repo: "shared/repo",
+                repo: "testuser/repo",
                 agent_id: "agent-a",
-            })
+            }),
+            "consent-request"
         );
 
         const postResp = await app.fetch(
@@ -143,7 +152,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "shared/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                     agent_id: "agent-b",
                     requested_scopes_enc: encrypted,
@@ -172,7 +181,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                 }),
             }),
@@ -199,7 +208,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                     agent_id: "test-agent",
                     requested_scopes_enc: "AAAA.BBBa5nRhaW5lZFN0cmluZw.CCC.DDD",
@@ -227,10 +236,13 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
                 scopes: "contents:read",
-                repo: "owner/repo",
+                repo: "testuser/repo",
                 agent_id: "test-agent",
-            })
+            }),
+            "consent-request"
         );
 
         const resp = await app.fetch(
@@ -238,7 +250,7 @@ describe("Consent Scope Validation (Scope Escalation Prevention)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: ["contents:read", "issues:write"], // Injected scope!
                     agent_id: "test-agent",
                     requested_scopes_enc: encrypted,

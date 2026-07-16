@@ -60,15 +60,16 @@ export async function initKey(secret?: string): Promise<CryptoKeyRef> {
 
 export async function encryptWith(
     key: CryptoKeyRef,
-    data: string
+    data: string,
+    additionalData?: string
 ): Promise<string> {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encoded = new TextEncoder().encode(data);
-    const ciphertext = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        key,
-        encoded
-    );
+    const aesParams: AesGcmParams = { name: "AES-GCM", iv };
+    if (additionalData !== undefined) {
+        aesParams.additionalData = new TextEncoder().encode(additionalData);
+    }
+    const ciphertext = await crypto.subtle.encrypt(aesParams, key, encoded);
     const combined = new Uint8Array(iv.length + ciphertext.byteLength);
     combined.set(iv);
     combined.set(new Uint8Array(ciphertext), iv.length);
@@ -77,7 +78,8 @@ export async function encryptWith(
 
 export async function decryptWith(
     key: CryptoKeyRef,
-    packet: string
+    packet: string,
+    additionalData?: string
 ): Promise<string | null> {
     try {
         const dot = packet.indexOf(".");
@@ -85,11 +87,11 @@ export async function decryptWith(
         const raw = base64Decode(packet.slice(dot + 1));
         const iv = raw.slice(0, 12);
         const ciphertext = raw.slice(12);
-        const decoded = await crypto.subtle.decrypt(
-            { name: "AES-GCM", iv },
-            key,
-            ciphertext
-        );
+        const aesParams: AesGcmParams = { name: "AES-GCM", iv };
+        if (additionalData !== undefined) {
+            aesParams.additionalData = new TextEncoder().encode(additionalData);
+        }
+        const decoded = await crypto.subtle.decrypt(aesParams, key, ciphertext);
         return new TextDecoder().decode(decoded);
     } catch {
         return null;

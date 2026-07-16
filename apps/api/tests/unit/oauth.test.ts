@@ -51,7 +51,7 @@ describe("GET /callback", () => {
 
     it("returns 400 when state decrypts but is not valid JSON", async () => {
         const key = await getOrInitKey(TEST_SECRET);
-        const encrypted = await encryptWith(key, "not-json");
+        const encrypted = await encryptWith(key, "not-json", "oauth-state");
         const resp = await client.callback.$get({
             query: { code: "code", state: encrypted },
         });
@@ -61,7 +61,11 @@ describe("GET /callback", () => {
 
     it("returns 400 when state payload is missing verifier", async () => {
         const key = await getOrInitKey(TEST_SECRET);
-        const encrypted = await encryptWith(key, JSON.stringify({ n: "/" }));
+        const encrypted = await encryptWith(
+            key,
+            JSON.stringify({ n: "/" }),
+            "oauth-state"
+        );
         const resp = await client.callback.$get({
             query: { code: "code", state: encrypted },
         });
@@ -79,7 +83,8 @@ describe("GET /callback", () => {
         const key = await getOrInitKey(TEST_SECRET);
         const encrypted = await encryptWith(
             key,
-            JSON.stringify({ v: "verifier", n: "/" })
+            JSON.stringify({ v: "verifier", n: "/" }),
+            "oauth-state"
         );
         const resp = await client.callback.$get({
             query: { code: "bad-code", state: encrypted },
@@ -98,7 +103,8 @@ describe("GET /callback", () => {
         const key = await getOrInitKey(TEST_SECRET);
         const encrypted = await encryptWith(
             key,
-            JSON.stringify({ v: "verifier", n: "/" })
+            JSON.stringify({ v: "verifier", n: "/" }),
+            "oauth-state"
         );
         const resp = await client.callback.$get({
             query: { code: "code", state: encrypted },
@@ -126,7 +132,8 @@ describe("GET /callback", () => {
         const key = await getOrInitKey(TEST_SECRET);
         const encrypted = await encryptWith(
             key,
-            JSON.stringify({ v: "valid-verifier", n: "/dashboard" })
+            JSON.stringify({ v: "valid-verifier", n: "/dashboard" }),
+            "oauth-state"
         );
         const resp = await client.callback.$get({
             query: { code: "valid-code", state: encrypted },
@@ -164,7 +171,8 @@ describe("GET /callback", () => {
                 v: "verifier",
                 n: "/done",
                 r: "http://localhost:5178/callback",
-            })
+            }),
+            "oauth-state"
         );
         const resp = await client.callback.$get({
             query: { code: "code", state: encrypted },
@@ -207,7 +215,8 @@ describe("GET /callback", () => {
         // n contains an external URL — should be sanitized to /
         const encrypted = await encryptWith(
             key,
-            JSON.stringify({ v: "verifier", n: "//evil.com" })
+            JSON.stringify({ v: "verifier", n: "//evil.com" }),
+            "oauth-state"
         );
         const resp = await client.callback.$get({
             query: { code: "code", state: encrypted },

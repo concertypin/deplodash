@@ -255,7 +255,7 @@ export class ConsentService {
 
         if (agentId) {
             const agentPrefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
-            const tokenPrefix = `gh_token:${agentId}:${repo}:`;
+            const tokenPrefix = `gh_token_v2:${agentId}:${repo}:`;
             const [consentEntries, tokenEntries] = await Promise.all([
                 this.kv.list({ prefix: agentPrefix }),
                 this.kv.list({ prefix: tokenPrefix }),
@@ -271,9 +271,15 @@ export class ConsentService {
                 const suffix = name.startsWith(CONSENT_PREFIX)
                     ? name.slice(CONSENT_PREFIX.length)
                     : "";
-                if (suffix.includes(`${repo}:`)) {
+                if (!suffix) continue;
+                // Suffix format: agentId:repo:scopesHash
+                const parts = suffix.split(":");
+                if (parts.length >= 2 && parts[parts.length - 2] === repo) {
                     consentKeysToDelete.push(name);
-                    const tokenKey = name.replace(CONSENT_PREFIX, "gh_token:");
+                    const tokenKey = name.replace(
+                        CONSENT_PREFIX,
+                        "gh_token_v2:"
+                    );
                     tokenKeysToDelete.push(tokenKey);
                 }
             }
