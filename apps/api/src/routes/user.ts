@@ -1,10 +1,18 @@
-import { listAgentTokens, registerAgentToken, revokeAgentToken, verifyAgentToken } from "@/middleware/agent-auth";
+import {
+    listAgentTokens,
+    registerAgentToken,
+    revokeAgentToken,
+    verifyAgentToken,
+} from "@/middleware/agent-auth";
 import { randomBytes } from "@/crypto";
 import { validator } from "hono-openapi";
 import { z } from "zod";
 
 const createAgentSchema = z.object({
-    agent_id: z.string().min(1, "Agent ID is required").max(64, "Agent ID too long"),
+    agent_id: z
+        .string()
+        .min(1, "Agent ID is required")
+        .max(64, "Agent ID too long"),
     label: z.string().max(128, "Label too long").optional(),
 });
 
@@ -74,7 +82,7 @@ export const userRouter = new Hono<HonoEnv>()
 
         const allTokens = await listAgentTokens(c.env.KV);
         const userTokens = allTokens.filter(
-            (t) => t.info.created_by === user.login,
+            (t) => t.info.created_by === user.login
         );
 
         return c.json({
@@ -104,7 +112,7 @@ export const userRouter = new Hono<HonoEnv>()
                 token,
                 agent_id,
                 label,
-                user.login,
+                user.login
             );
 
             return c.json({
@@ -117,7 +125,7 @@ export const userRouter = new Hono<HonoEnv>()
                     created_by: user.login,
                 },
             });
-        },
+        }
     )
 
     .post(
@@ -137,5 +145,5 @@ export const userRouter = new Hono<HonoEnv>()
 
             await revokeAgentToken(c.env.KV, token);
             return c.json({ status: "ok" });
-        },
+        }
     );

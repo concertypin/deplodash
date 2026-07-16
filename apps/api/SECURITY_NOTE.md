@@ -44,6 +44,7 @@ The `granted_by` field (GitHub login of the user who approved) is now also
 recorded and enforced on revocation (see D-001 below).
 
 ---
+
 ## Agent Token Revocation (src/routes/user.ts)
 
 **Status**: User-managed (dashboard).

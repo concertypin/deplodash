@@ -64,7 +64,7 @@ describe("User agent token management", () => {
                 id: 1,
                 avatar_url: "",
                 name: "Test User",
-            }),
+            })
         );
         vi.stubGlobal("fetch", mockFetch);
     });
@@ -79,7 +79,7 @@ describe("User agent token management", () => {
             const resp = await app.request(
                 "/api/user/agent/list",
                 undefined,
-                BASE_ENV,
+                BASE_ENV
             );
             expect(resp.status).toBe(401);
         });
@@ -89,7 +89,7 @@ describe("User agent token management", () => {
             const resp = await app.request(
                 "/api/user/agent/list",
                 undefined,
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(200);
             const body = listResponseSchema.parse(await resp.json());
@@ -102,28 +102,28 @@ describe("User agent token management", () => {
                 "user-token-1",
                 "agent-alpha",
                 "Agent Alpha",
-                "testuser",
+                "testuser"
             );
             await registerAgentToken(
                 env.KV,
                 "user-token-2",
                 "agent-beta",
                 "Agent Beta",
-                "anotheruser",
+                "anotheruser"
             );
             await registerAgentToken(
                 env.KV,
                 "user-token-3",
                 "agent-gamma",
                 undefined,
-                "testuser",
+                "testuser"
             );
 
             const { app, authEnv } = makeApp();
             const resp = await app.request(
                 "/api/user/agent/list",
                 undefined,
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(200);
             const body = listResponseSchema.parse(await resp.json());
@@ -152,7 +152,7 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ agent_id: "new-agent" }),
                 },
-                BASE_ENV,
+                BASE_ENV
             );
             expect(resp.status).toBe(401);
         });
@@ -169,7 +169,7 @@ describe("User agent token management", () => {
                         label: "My New Agent",
                     }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(200);
             const body = createResponseSchema.parse(await resp.json());
@@ -193,7 +193,7 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ agent_id: "minimal-agent" }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(200);
             const body = createResponseSchema.parse(await resp.json());
@@ -209,7 +209,7 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ agent_id: "" }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(400);
         });
@@ -225,7 +225,7 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ token: "some-token" }),
                 },
-                BASE_ENV,
+                BASE_ENV
             );
             expect(resp.status).toBe(401);
         });
@@ -236,7 +236,7 @@ describe("User agent token management", () => {
                 "token-to-revoke",
                 "revocable-agent",
                 "Revocable",
-                "testuser",
+                "testuser"
             );
 
             const { app, authEnv } = makeApp();
@@ -247,16 +247,13 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ token: "token-to-revoke" }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(200);
             const body = await resp.json();
             expect(body).toEqual({ status: "ok" });
 
-            const verified = await verifyAgentToken(
-                env.KV,
-                "token-to-revoke",
-            );
+            const verified = await verifyAgentToken(env.KV, "token-to-revoke");
             expect(verified).toBeNull();
         });
 
@@ -266,7 +263,7 @@ describe("User agent token management", () => {
                 "other-user-token",
                 "other-agent",
                 "Other",
-                "anotheruser",
+                "anotheruser"
             );
 
             const { app, authEnv } = makeApp();
@@ -277,14 +274,11 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ token: "other-user-token" }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(403);
 
-            const verified = await verifyAgentToken(
-                env.KV,
-                "other-user-token",
-            );
+            const verified = await verifyAgentToken(env.KV, "other-user-token");
             expect(verified).not.toBeNull();
         });
 
@@ -297,7 +291,7 @@ describe("User agent token management", () => {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ token: "nonexistent-token" }),
                 },
-                authEnv,
+                authEnv
             );
             expect(resp.status).toBe(403);
         });

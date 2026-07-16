@@ -25,9 +25,7 @@ const agentInfoSchema = z.object({
 });
 
 /** Convert a Zod-parsed token value to AgentInfo. */
-function toAgentInfo(
-    data: z.infer<typeof agentInfoSchema>,
-): AgentInfo {
+function toAgentInfo(data: z.infer<typeof agentInfoSchema>): AgentInfo {
     return {
         agent_id: data.agent_id,
         label: data.label,
