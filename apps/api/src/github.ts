@@ -91,6 +91,30 @@ export class GitHubClient {
         return this.req<GitHubUser>("/user");
     }
 
+    async checkRepoAdmin(owner: string, repo: string): Promise<boolean> {
+        try {
+            const data = await this.req<{ permissions?: { admin: boolean } }>(
+                `/repos/${owner}/${repo}`
+            );
+            return data.permissions?.admin ?? false;
+        } catch (err) {
+            if (err instanceof TokenExpiredError) throw err;
+            return false;
+        }
+    }
+
+    async checkOrgAdmin(org: string, username: string): Promise<boolean> {
+        try {
+            const data = await this.req<{ role: string; state: string }>(
+                `/orgs/${org}/memberships/${username}`
+            );
+            return data.role === "admin" && data.state === "active";
+        } catch (err) {
+            if (err instanceof TokenExpiredError) throw err;
+            return false;
+        }
+    }
+
     createRepo(name: string, isPrivate: boolean): Promise<Repo> {
         return this.req<Repo>("/user/repos", {
             method: "POST",

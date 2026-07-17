@@ -42,14 +42,24 @@ describe("POST /api/consent", () => {
         vi.unstubAllGlobals();
     });
 
-    /** Generate an encrypted `requested_scopes_enc` payload. */
+    /** Generate an encrypted `requested_scopes_enc` payload with consent-request AAD. */
     async function encryptedPayload(data: {
         scopes: string;
         repo?: string;
         agent_id?: string;
     }): Promise<string> {
         const key = await getOrInitKey(TEST_SECRET);
-        return encryptWith(key, JSON.stringify(data));
+        return encryptWith(
+            key,
+            JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
+                scopes: data.scopes,
+                repo: data.repo ?? "testuser/repo",
+                agent_id: data.agent_id ?? "test-agent",
+            }),
+            "consent-request"
+        );
     }
 
     /** Helper: POST /api/consent with a valid encrypted payload. */
@@ -69,9 +79,16 @@ describe("POST /api/consent", () => {
         const encValue =
             body.requested_scopes_enc ??
             (await encryptedPayload({
-                scopes: (body.scopes as string) || "contents:read",
-                repo: (body.repo as string) || "owner/repo",
-                agent_id: (body.agent_id as string) || "test-agent",
+                scopes:
+                    typeof body.scopes === "string"
+                        ? body.scopes
+                        : "contents:read",
+                repo:
+                    typeof body.repo === "string" ? body.repo : "testuser/repo",
+                agent_id:
+                    typeof body.agent_id === "string"
+                        ? body.agent_id
+                        : "test-agent",
             }));
 
         return app.fetch(
@@ -89,7 +106,7 @@ describe("POST /api/consent", () => {
 
     it("records consent and returns status ok", async () => {
         const resp = await consentPost({
-            repo: "owner/repo",
+            repo: "testuser/repo",
             scopes: "contents:read",
             agent_id: "test-agent",
         });
@@ -98,7 +115,7 @@ describe("POST /api/consent", () => {
         expect(body).toEqual({ status: "ok" });
         const tokenService = new TokenService(env.KV);
         expect(
-            await tokenService.checkConsent("test-agent", "owner/repo", [
+            await tokenService.checkConsent("test-agent", "testuser/repo", [
                 "contents:read",
             ])
         ).toBe(true);
@@ -109,7 +126,7 @@ describe("POST /api/consent", () => {
             new Error("KV write failed")
         );
         const resp = await consentPost({
-            repo: "owner/repo",
+            repo: "testuser/repo",
             scopes: "contents:read",
             agent_id: "test-agent",
         });
@@ -129,7 +146,7 @@ describe("POST /api/consent", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                 }),
             }),
@@ -154,7 +171,7 @@ describe("POST /api/consent", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                     requested_scopes_enc: "invalid.encrypted.value",
                 }),
@@ -178,7 +195,7 @@ describe("POST /api/consent", () => {
 
         const encValue = await encryptedPayload({
             scopes: "contents:read",
-            repo: "owner/repo",
+            repo: "testuser/repo",
             agent_id: "test-agent",
         });
 
@@ -187,7 +204,7 @@ describe("POST /api/consent", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
                     scopes: "contents:read",
                     agent_id: "test-agent",
                     requested_scopes_enc: encValue,
@@ -212,7 +229,7 @@ describe("POST /api/consent", () => {
 
         const encValue = await encryptedPayload({
             scopes: "contents:read,issues:write,administration:read",
-            repo: "owner/repo",
+            repo: "testuser/repo",
             agent_id: "test-agent",
         });
 
@@ -221,7 +238,294 @@ describe("POST /api/consent", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "testuser/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encValue,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+        contains(body, "status");
+        expect(body.status).toBe("ok");
+    });
+
+    // ── DS-R01-C07: Cryptographic purpose separation & schema validation ──────
+
+    it("rejects OAuth state payload replayed as consent request (AAD purpose separation)", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        // Encrypt with "oauth-state" AAD — the consent route expects "consent-request"
+        const key = await getOrInitKey(TEST_SECRET);
+        const oauthStateEnc = await encryptWith(
+            key,
+            JSON.stringify({
+                v: "verifier",
+                n: "/",
+                r: "http://localhost/callback",
+            }),
+            "oauth-state"
+        );
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: oauthStateEnc,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(400);
+        const body = await resp.json();
+        contains(body, "error");
+        expect(body.error).toContain("Invalid consent request");
+    });
+
+    it("rejects encrypted payload missing version field", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const key = await getOrInitKey(TEST_SECRET);
+        const badPayload = await encryptWith(
+            key,
+            JSON.stringify({
+                purpose: "consent-request",
+                scopes: "contents:read",
+                repo: "testuser/repo",
+                agent_id: "test-agent",
+            }),
+            "consent-request"
+        );
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: badPayload,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(400);
+        const body = await resp.json();
+        contains(body, "error");
+        expect(body.error).toContain("Invalid consent request");
+    });
+
+    it("rejects encrypted payload with repo mismatch", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const key = await getOrInitKey(TEST_SECRET);
+        const mismatchPayload = await encryptWith(
+            key,
+            JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
+                scopes: "contents:read",
+                repo: "other/repo",
+                agent_id: "test-agent",
+            }),
+            "consent-request"
+        );
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: mismatchPayload,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(400);
+        const body = await resp.json();
+        contains(body, "error");
+        expect(body.error).toContain("Invalid consent request");
+    });
+
+    it("rejects encrypted payload with agent_id mismatch", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const key = await getOrInitKey(TEST_SECRET);
+        const mismatchPayload = await encryptWith(
+            key,
+            JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
+                scopes: "contents:read",
+                repo: "testuser/repo",
+                agent_id: "other-agent",
+            }),
+            "consent-request"
+        );
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: mismatchPayload,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(400);
+        const body = await resp.json();
+        contains(body, "error");
+        expect(body.error).toContain("Invalid consent request");
+    });
+
+    // ── DS-R01-C01: Repository authority verification ────────────────────────
+
+    it("rejects consent when user lacks admin authority on a different owner's repo", async () => {
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const encValue = await encryptedPayload({
+            scopes: "contents:read",
+            repo: "other-owner/repo",
+            agent_id: "test-agent",
+        });
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "other-owner/repo",
+                    scopes: "contents:read",
+                    agent_id: "test-agent",
+                    requested_scopes_enc: encValue,
+                }),
+            }),
+            authEnv
+        );
+        expect(resp.status).toBe(403);
+    });
+
+    it("accepts consent when user owns the target namespace (username matches repo owner)", async () => {
+        const resp = await consentPost({
+            repo: "testuser/my-repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+        });
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+        contains(body, "status");
+        expect(body.status).toBe("ok");
+    });
+
+    it("accepts consent when user is a GitHub repo admin", async () => {
+        // First call: GET /user returns testuser
+        // Second call: GET /repos/org/repo returns admin: true
+        mockFetch
+            .mockResolvedValueOnce(
+                Response.json({
+                    login: "testuser",
+                    id: 1,
+                    avatar_url: "",
+                    name: "Test User",
+                })
+            )
+            .mockResolvedValueOnce(
+                Response.json({ id: 1, permissions: { admin: true } })
+            );
+
+        const resp = await consentPost({
+            repo: "org/repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+        });
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+        contains(body, "status");
+        expect(body.status).toBe("ok");
+    });
+
+    it("accepts consent when user is an org admin", async () => {
+        // First call: GET /user returns testuser
+        // Second call: GET /repos/org/repo returns 404 (repo doesn't exist)
+        // Third call: GET /orgs/org/memberships/testuser returns role=admin
+        mockFetch
+            .mockResolvedValueOnce(
+                Response.json({
+                    login: "testuser",
+                    id: 1,
+                    avatar_url: "",
+                    name: "Test User",
+                })
+            )
+            .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+            .mockResolvedValueOnce(
+                Response.json({ role: "admin", state: "active" })
+            );
+
+        const authEnv: HonoEnv["Bindings"] = {
+            ...BASE_ENV,
+            GITHUB_TOKEN: "ghp_test_user_token",
+        };
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+
+        const encValue = await encryptedPayload({
+            scopes: "contents:read",
+            repo: "org/repo",
+            agent_id: "test-agent",
+        });
+
+        const resp = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "org/repo",
                     scopes: "contents:read",
                     agent_id: "test-agent",
                     requested_scopes_enc: encValue,

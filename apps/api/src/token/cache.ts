@@ -2,7 +2,7 @@
  * Token cache — GitHub Installation Token caching via Cloudflare KV.
  *
  * KV key layout:
- *   gh_token:${agentId}:${repo}:${scopesHash}    → CachedToken
+ *   gh_token_v2:${agentId}:${repo}:${scopesHash}    → CachedToken
  *
  * Cache entries expire 5 minutes before the actual token expiry,
  * with a maximum TTL of 1 hour.
@@ -24,7 +24,7 @@ function tokenCacheKey(
     repo: string,
     scopesHash: string
 ): string {
-    return `gh_token:${agentId}:${repo}:${scopesHash}`;
+    return `gh_token_v2:${agentId}:${repo}:${scopesHash}`;
 }
 
 /**

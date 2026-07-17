@@ -30,10 +30,13 @@ describe("Consent scope validation (concurrent-safe)", () => {
             const encrypted = await encryptWith(
                 key,
                 JSON.stringify({
+                    version: 1,
+                    purpose: "consent-request",
                     scopes: "contents:read",
                     repo: "victim/repo",
-                    agent_id: "agent-A",
-                })
+                    agent_id: "test-agent",
+                }),
+                "consent-request"
             );
 
             const postResp = await app.fetch(
@@ -44,7 +47,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                         repo: "different/repo",
                         scopes: "contents:read",
                         requested_scopes_enc: encrypted,
-                        agent_id: "agent-A",
+                        agent_id: "test-agent",
                     }),
                 }),
                 CONCURRENT_ENV
@@ -67,10 +70,13 @@ describe("Consent scope validation (concurrent-safe)", () => {
             const encrypted = await encryptWith(
                 key,
                 JSON.stringify({
+                    version: 1,
+                    purpose: "consent-request",
                     scopes: "contents:read",
-                    repo: "owner/repo",
+                    repo: "shared/repo",
                     agent_id: "agent-A",
-                })
+                }),
+                "consent-request"
             );
 
             const postResp = await app.fetch(
@@ -78,7 +84,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        repo: "owner/repo",
+                        repo: "shared/repo",
                         scopes: "contents:read",
                         agent_id: "agent-B",
                         requested_scopes_enc: encrypted,
@@ -102,10 +108,13 @@ describe("Consent scope validation (concurrent-safe)", () => {
         const encrypted = await encryptWith(
             key,
             JSON.stringify({
+                version: 1,
+                purpose: "consent-request",
                 scopes: "contents:read",
-                repo: "owner/repo",
+                repo: "shared/repo",
                 agent_id: "test-agent",
-            })
+            }),
+            "consent-request"
         );
 
         // POST with a valid encrypted payload but no scopes selected (no scopes field)
@@ -114,7 +123,7 @@ describe("Consent scope validation (concurrent-safe)", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "owner/repo",
+                    repo: "shared/repo",
                     requested_scopes_enc: encrypted,
                     agent_id: "test-agent",
                     // no scopes field

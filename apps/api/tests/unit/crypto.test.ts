@@ -191,6 +191,82 @@ describe("decryptWith error handling", () => {
     });
 });
 
+describe("encryptWith / decryptWith with Additional Authenticated Data", () => {
+    let key: CryptoKey;
+
+    beforeEach(async () => {
+        resetKeyCache();
+        key = await initKey("test-secret-1234567890123456");
+    });
+
+    it("round-trips with AAD", async () => {
+        const original = "sensitive consent data";
+        const encrypted = await encryptWith(key, original, "consent-request");
+        expect(encrypted).toContain("k1.");
+        const decrypted = await decryptWith(key, encrypted, "consent-request");
+        expect(decrypted).toBe(original);
+    });
+
+    it("returns null when decrypting with wrong AAD", async () => {
+        const encrypted = await encryptWith(
+            key,
+            "secret data",
+            "consent-request"
+        );
+        const result = await decryptWith(key, encrypted, "oauth-state");
+        expect(result).toBeNull();
+    });
+
+    it("returns null when decrypting with AAD after encrypting without one", async () => {
+        const encrypted = await encryptWith(key, "secret data");
+        const result = await decryptWith(key, encrypted, "consent-request");
+        expect(result).toBeNull();
+    });
+
+    it("returns null when decrypting without AAD after encrypting with one", async () => {
+        const encrypted = await encryptWith(
+            key,
+            "secret data",
+            "consent-request"
+        );
+        const result = await decryptWith(key, encrypted);
+        expect(result).toBeNull();
+    });
+
+    it("purpose separation: oauth-state vs consent-request AAD produce incompatible ciphertexts", async () => {
+        const data = JSON.stringify({ v: "verifier", n: "/" });
+        const encryptedOAuth = await encryptWith(key, data, "oauth-state");
+        const encryptedConsent = await encryptWith(
+            key,
+            data,
+            "consent-request"
+        );
+
+        // Each with matching AAD succeeds
+        expect(await decryptWith(key, encryptedOAuth, "oauth-state")).toBe(
+            data
+        );
+        expect(
+            await decryptWith(key, encryptedConsent, "consent-request")
+        ).toBe(data);
+
+        // Cross-purpose decryption fails
+        expect(
+            await decryptWith(key, encryptedOAuth, "consent-request")
+        ).toBeNull();
+        expect(
+            await decryptWith(key, encryptedConsent, "oauth-state")
+        ).toBeNull();
+    });
+
+    it("round-trips with empty string AAD", async () => {
+        const original = "data with empty AAD";
+        const encrypted = await encryptWith(key, original, "");
+        const decrypted = await decryptWith(key, encrypted, "");
+        expect(decrypted).toBe(original);
+    });
+});
+
 describe("pkceChallenge", () => {
     it("returns a URL-safe base64 string", async () => {
         const challenge = await pkceChallenge("test-verifier-string");

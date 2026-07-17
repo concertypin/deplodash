@@ -58,7 +58,11 @@ export const authRouter = new Hono<HonoEnv>().get(
             n: next,
             r: redirectUri,
         });
-        const encryptedState = await encryptWith(key, statePayload);
+        const encryptedState = await encryptWith(
+            key,
+            statePayload,
+            "oauth-state"
+        );
         const params = new URLSearchParams({
             client_id: c.env.GITHUB_CLIENT_ID,
             redirect_uri: redirectUri,
