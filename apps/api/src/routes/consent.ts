@@ -51,7 +51,7 @@ async function assertApproverCanGrantConsent(
     if (await ghClient.checkRepoAdmin(owner, name)) return;
 
     // 2. If repo doesn't exist, user must own the target namespace or be an org owner.
-    if (owner.toLowerCase() === username.toLowerCase()) return;
+    if (owner === username) return;
     if (await ghClient.checkOrgAdmin(owner, username)) return;
 
     throw new Error(

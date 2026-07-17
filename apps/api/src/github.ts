@@ -97,7 +97,8 @@ export class GitHubClient {
                 `/repos/${owner}/${repo}`
             );
             return data.permissions?.admin ?? false;
-        } catch {
+        } catch (err) {
+            if (err instanceof TokenExpiredError) throw err;
             return false;
         }
     }
@@ -108,7 +109,8 @@ export class GitHubClient {
                 `/orgs/${org}/memberships/${username}`
             );
             return data.role === "admin" && data.state === "active";
-        } catch {
+        } catch (err) {
+            if (err instanceof TokenExpiredError) throw err;
             return false;
         }
     }
