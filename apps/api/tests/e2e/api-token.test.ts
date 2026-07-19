@@ -171,6 +171,7 @@ describe("API token E2E flow", () => {
         const tokenService = new TokenService(env.KV);
         await tokenService.recordConsent("agent-2", "neworg/new-repo", [
             "contents:write",
+            "administration:write",
         ]);
 
         mockFetch
@@ -206,7 +207,7 @@ describe("API token E2E flow", () => {
             {
                 json: {
                     repo: "neworg/new-repo",
-                    scopes: ["contents:write"],
+                    scopes: ["contents:write", "administration:write"],
                 },
             },
             { headers: { Authorization: "Bearer agent-token-create" } }
@@ -219,7 +220,10 @@ describe("API token E2E flow", () => {
             token: "ghs_created_repo_token",
         });
         expect(typeof body.expires_at).toBe("string");
-        expect(body.effective_scopes).toEqual(["contents:write"]);
+        expect(body.effective_scopes).toEqual([
+            "contents:write",
+            "administration:write",
+        ]);
         expect(mockFetch).toHaveBeenCalledTimes(6);
     });
 

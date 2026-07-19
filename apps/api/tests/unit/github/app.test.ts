@@ -195,6 +195,45 @@ describe("GitHubApp", () => {
             expect(thrown!.message).toMatch(/token request failed/i);
             expect(thrown!.message).not.toContain("Bad credentials");
         });
+
+        it("includes repositories in the POST body when provided", async () => {
+            mockFetch.mockResolvedValue(
+                jsonResponse({
+                    token: "ghs_token_repo_scoped",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { contents: "read" },
+                    repository_selection: "selected",
+                })
+            );
+            const app = new GitHubApp("123456", pkcs8Pem);
+            await app.getInstallationToken({ contents: "read" }, "42", [
+                "my-repo",
+            ]);
+
+            expect(mockFetch).toHaveBeenCalledTimes(1);
+            const [callUrl, callInit] = mockFetch.mock.calls[0] ?? [];
+            expect(callUrl).toBeDefined();
+            expect(callInit).toBeDefined();
+
+            // Check URL — extract string representation safely
+            const urlStr =
+                typeof callUrl === "string"
+                    ? callUrl
+                    : callUrl instanceof URL
+                      ? callUrl.toString()
+                      : "";
+            expect(urlStr).toContain("/app/installations/42/access_tokens");
+
+            // Check body contains repositories field
+            const bodyText =
+                callInit && typeof callInit.body === "string"
+                    ? callInit.body
+                    : null;
+            expect(bodyText).not.toBeNull();
+            expect(bodyText).toContain('"repositories"');
+            expect(bodyText).toContain('"my-repo"');
+            expect(bodyText).toContain('"permissions"');
+        });
     });
 
     describe("requestToken", () => {
@@ -280,7 +319,11 @@ describe("GitHubApp", () => {
                     )
                 );
             const app = new GitHubApp("123456", pkcs8Pem);
-            const result = await app.ensureRepoExists("myorg", "new-repo");
+            const result = await app.ensureRepoExists(
+                "myorg",
+                "new-repo",
+                true
+            );
             expect(result).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(5);
             expect(mockFetch.mock.calls[4]![0] as string).toContain(
@@ -314,7 +357,11 @@ describe("GitHubApp", () => {
                     )
                 );
             const app = new GitHubApp("123456", pkcs8Pem);
-            const result = await app.ensureRepoExists("myuser", "user-repo");
+            const result = await app.ensureRepoExists(
+                "myuser",
+                "user-repo",
+                true
+            );
             expect(result).toBe(true);
             expect(mockFetch).toHaveBeenCalledTimes(5);
             expect(mockFetch.mock.calls[4]![0] as string).toContain(
@@ -376,13 +423,83 @@ describe("GitHubApp", () => {
             const app = new GitHubApp("123456", pkcs8Pem);
             let thrown: Error | undefined;
             try {
-                await app.ensureRepoExists("myorg", "failing-repo");
+                await app.ensureRepoExists("myorg", "failing-repo", true);
             } catch (e) {
-                thrown = e as Error;
+                if (e instanceof Error) thrown = e;
             }
             expect(thrown).toBeDefined();
             expect(thrown!.message).toMatch(/failed to create repo/i);
             expect(thrown!.message).not.toContain("Validation failed");
+        });
+
+        it("throws 'Repository not found' when allowCreate is false and repo does not exist", async () => {
+            mockFetch
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                );
+            const app = new GitHubApp("123456", pkcs8Pem);
+            let thrown: Error | undefined;
+            try {
+                await app.ensureRepoExists("myorg", "missing-repo", false);
+            } catch (e) {
+                if (e instanceof Error) thrown = e;
+            }
+            expect(thrown).toBeDefined();
+            expect(thrown!.message).toContain("Repository not found");
+        });
+
+        it("creates a repo when allowCreate is true and repo does not exist", async () => {
+            mockFetch
+                .mockResolvedValueOnce(
+                    jsonResponse({ id: 10, account: { login: "myorg" } })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
+                .mockResolvedValueOnce(
+                    jsonResponse(
+                        { name: "new-repo", full_name: "myorg/new-repo" },
+                        201
+                    )
+                );
+            const app = new GitHubApp("123456", pkcs8Pem);
+            const result = await app.ensureRepoExists(
+                "myorg",
+                "new-repo",
+                true
+            );
+            expect(result).toBe(true);
+            expect(mockFetch).toHaveBeenCalledTimes(5);
+            const lastCall = mockFetch.mock.calls[4];
+            expect(lastCall).toBeDefined();
+            const [lastUrl] = lastCall!;
+            const urlStr =
+                typeof lastUrl === "string"
+                    ? lastUrl
+                    : lastUrl instanceof URL
+                      ? lastUrl.toString()
+                      : "";
+            expect(urlStr).toContain("/orgs/myorg/repos");
         });
     });
 });

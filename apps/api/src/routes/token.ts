@@ -20,6 +20,7 @@ import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { encryptWith, getOrInitKey } from "@/crypto";
+import { permissionsFromScopes } from "@/github/scopes";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ const KNOWN_SAFE_ERRORS: RegExp[] = [
 
 export const tokenRouter = new Hono<HonoEnv>().post(
     "/token",
+    bodyLimit({ maxSize: 50 * 1024 }),
     agentAuthMiddleware(),
     describeRoute({
         description:
@@ -177,10 +179,13 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     requested_scopes_enc = await encryptWith(
                         key,
                         JSON.stringify({
+                            version: 1,
+                            purpose: "consent-request",
                             scopes: scopes.join(","),
                             repo,
                             agent_id: agentId,
-                        })
+                        }),
+                        "consent-request"
                     );
                 }
 
@@ -223,9 +228,15 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 });
             }
 
-            // No cache hit: create repo if needed, then issue token with effective scopes
-            await gh.ensureRepoExists(owner, name);
-            const tokenResult = await gh.requestToken(effectiveScopes, owner);
+            // Determine repo creation permissions
+            const perms = permissionsFromScopes(effectiveScopes);
+            const allowCreate = perms.administration === "write";
+            await gh.ensureRepoExists(owner, name, allowCreate);
+            const tokenResult = await gh.requestToken(
+                effectiveScopes,
+                owner,
+                name
+            );
             await tokenService.cacheToken(
                 agentId,
                 repo,
@@ -250,11 +261,11 @@ export const tokenRouter = new Hono<HonoEnv>().post(
         }
     }
 );
-tokenRouter.use("/token", bodyLimit({ maxSize: 50 * 1024 }));
 
 tokenRouter.on(
     "QUERY",
     "/wait",
+    bodyLimit({ maxSize: 50 * 1024 }),
     agentAuthMiddleware(),
     describeRoute({
         description:

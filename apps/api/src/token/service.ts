@@ -175,10 +175,13 @@ export class TokenService {
                     requested_scopes_enc = await encryptWith(
                         key,
                         JSON.stringify({
+                            version: 1,
+                            purpose: "consent-request",
                             scopes: scopes.join(","),
                             repo,
                             agent_id: params.agentId,
-                        })
+                        }),
+                        "consent-request"
                     );
                     consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
                 }

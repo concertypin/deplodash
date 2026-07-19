@@ -38,7 +38,7 @@ export const oauthRouter = new Hono<HonoEnv>()
         const state = c.req.query("state");
         if (!code || !state) return c.text("Missing code or state", 400);
 
-        const plain = await decryptWith(key, state);
+        const plain = await decryptWith(key, state, "oauth-state");
         if (!plain) return c.text("Invalid state", 400);
         let parsed: unknown;
         try {

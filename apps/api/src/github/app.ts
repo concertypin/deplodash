@@ -172,7 +172,8 @@ export class GitHubApp {
      */
     async getInstallationToken(
         permissions: Record<string, string>,
-        installationId?: string
+        installationId?: string,
+        repositories?: string[]
     ): Promise<InstallationToken> {
         const installId = installationId;
         if (!installId) {
@@ -183,6 +184,10 @@ export class GitHubApp {
 
         const jwt = await this.getJwt();
         const url = `https://api.github.com/app/installations/${installId}/access_tokens`;
+        const body: Record<string, unknown> = { permissions };
+        if (repositories !== undefined) {
+            body.repositories = repositories;
+        }
         const res = await fetch(url, {
             method: "POST",
             headers: {
@@ -191,7 +196,7 @@ export class GitHubApp {
                 Accept: "application/vnd.github+json",
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ permissions }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             throw new Error(`GitHub App token request failed: ${res.status}`);
@@ -206,25 +211,28 @@ export class GitHubApp {
             repositorySelection: ghResponse.repository_selection,
         };
     }
-
-    /**
-     * Request an installation token for a specific set of scope strings and owner.
-     * Convenience wrapper that resolves the installation ID and requests a token.
-     */
     async requestToken(
         scopes: string[],
-        owner: string
+        owner: string,
+        repoName?: string
     ): Promise<InstallationToken> {
         const perms = permissionsFromScopes(scopes);
         const installationId = await this.resolveInstallationId(owner);
-        return this.getInstallationToken(perms, installationId);
+        return this.getInstallationToken(
+            perms,
+            installationId,
+            repoName ? [repoName] : undefined
+        );
     }
-
     /**
      * Ensure a repository exists. If it doesn't, create it using the
-     * GitHub App installation's admin permissions.
+     * GitHub App installation's admin permissions (only when allowCreate is true).
      */
-    async ensureRepoExists(owner: string, repo: string): Promise<boolean> {
+    async ensureRepoExists(
+        owner: string,
+        repo: string,
+        allowCreate = false
+    ): Promise<boolean> {
         // Check KV cache first
         const cacheKey = `repo_exists::${owner}/${repo}`;
         if (this.kv) {
@@ -267,6 +275,13 @@ export class GitHubApp {
         if (checkRes.status !== 404) {
             throw new Error(
                 `Failed to check repo existence: ${checkRes.status}`
+            );
+        }
+
+        // Repo not found — either create or reject based on allowCreate
+        if (!allowCreate) {
+            throw new Error(
+                "Failed to check repo existence: Repository not found."
             );
         }
 

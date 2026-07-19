@@ -161,6 +161,7 @@ describe("POST /api/token — Full grant flow", () => {
         const tokenService = new TokenService(env.KV);
         await tokenService.recordConsent("test-agent", "neworg/new-repo", [
             "contents:write",
+            "administration:write",
         ]);
         mockFetch
             .mockResolvedValueOnce(
@@ -186,14 +187,19 @@ describe("POST /api/token — Full grant flow", () => {
                 jsonResponse({
                     token: "ghs_created_repo_token",
                     expires_at: "2027-03-01T00:00:00Z",
-                    permissions: { contents: "write" },
+                    permissions: { contents: "write", administration: "write" },
                     repository_selection: "selected",
                 })
             );
 
         const client = testClient(app, makeEnv(pkcs8Pem));
         const resp = await client.api.token.$post(
-            { json: { repo: "neworg/new-repo", scopes: ["contents:write"] } },
+            {
+                json: {
+                    repo: "neworg/new-repo",
+                    scopes: ["contents:write", "administration:write"],
+                },
+            },
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
