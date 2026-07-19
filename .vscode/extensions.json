@@ -2,6 +2,8 @@
     "recommendations": [
         "esbenp.prettier-vscode",
         "oxc.oxc-vscode",
-        "vitest.explorer"
+        "vitest.explorer",
+        "svelte.svelte-vscode",
+        "dbaeumer.vscode-eslint"
     ]
 }

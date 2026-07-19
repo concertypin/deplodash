@@ -2,6 +2,7 @@ dist
 .claude
 public
 node_modules
-
+.svelte-check
+coverage
 pnpm-lock.yaml
 **/__screenshots__

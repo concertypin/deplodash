@@ -16,7 +16,15 @@ const oxlintize = true;
 
 export default defineConfig([
     {
-        ignores: ["dist/", "node_modules/", "*.config.*", "coverage/"],
+        ignores: [
+            "dist/",
+            "node_modules/",
+            "*.config.*",
+            "coverage/",
+            "dist-ts/",
+            ".git/",
+            ".svelte-check/",
+        ],
     },
     {
         files: ["**/*.svelte", "**/*.svelte.ts"],
@@ -81,7 +89,7 @@ export default defineConfig([
 
     ...(oxlintize
         ? oxlint
-              .buildFromOxlintConfigFile(".oxlintrc.json", {
+              .buildFromOxlintConfigFile("oxlint.config.ts", {
                   typeAware: true,
               })
               .map((config) => ({

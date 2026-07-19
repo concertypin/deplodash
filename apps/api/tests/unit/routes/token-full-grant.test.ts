@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
-import { TEST_SECRET, jsonResponse } from "../../helpers";
+import { TEST_SECRET, jsonResponse } from "@tests/helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -107,6 +107,22 @@ describe("POST /api/token — Full grant flow", () => {
     });
 
     it("returns 202 needs_consent without creating repo when no consent", async () => {
+        // mockFetch will be called by repoExists check before needs_consent response
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 42, account: { login: "other" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "check_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({ name: "repo", full_name: "other/repo" })
+            );
         const client = testClient(app, makeEnv(pkcs8Pem));
         const resp = await client.api.token.$post(
             { json: { repo: "other/repo", scopes: ["contents:read"] } },
@@ -115,7 +131,23 @@ describe("POST /api/token — Full grant flow", () => {
         expect(resp.status).toBe(202);
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("needs_consent");
-        expect(mockFetch).not.toHaveBeenCalled();
+        // fetch is now called for repo existence check (but not for creation)
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+        // Verify only the repo existence check happened (GET /repos), no creation POST
+        const repoExistenceCall = mockFetch.mock.calls.find(
+            ([url]) =>
+                typeof url === "string" && url.includes("/repos/other/repo")
+        );
+        expect(repoExistenceCall).toBeDefined();
+        // Ensure no POST to orgs/*/repos or user/repos (repo creation)
+        const repoCreateCall = mockFetch.mock.calls.find(([url, init]) => {
+            if (typeof url !== "string") return false;
+            if (!url.includes("/orgs/") && !url.includes("/user/repos")) {
+                return false;
+            }
+            return init?.method === "POST";
+        });
+        expect(repoCreateCall).toBeUndefined();
     });
 
     it("returns 200 with token for repo with admin scope", async () => {
@@ -159,10 +191,14 @@ describe("POST /api/token — Full grant flow", () => {
 
     it("creates repo and issues token when repo does not exist", async () => {
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("test-agent", "neworg/new-repo", [
-            "contents:write",
-            "administration:write",
-        ]);
+        await tokenService.recordConsent(
+            "test-agent",
+            "neworg/new-repo",
+            ["contents:write", "administration:write"],
+            undefined,
+            undefined,
+            "create-if-missing"
+        );
         mockFetch
             .mockResolvedValueOnce(
                 jsonResponse({ id: 77, account: { login: "neworg" } })
@@ -176,6 +212,14 @@ describe("POST /api/token — Full grant flow", () => {
                 })
             )
             .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_create_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
             .mockResolvedValueOnce(jsonResponse({ login: "neworg" }))
             .mockResolvedValueOnce(
                 jsonResponse(

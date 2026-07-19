@@ -225,14 +225,11 @@ export class GitHubApp {
         );
     }
     /**
-     * Ensure a repository exists. If it doesn't, create it using the
-     * GitHub App installation's admin permissions (only when allowCreate is true).
+     * Check whether a repository exists via the GitHub API.
+     * Returns `false` only on HTTP 404; throws on any other error.
+     * Successful lookups are cached in KV for 7 days.
      */
-    async ensureRepoExists(
-        owner: string,
-        repo: string,
-        allowCreate = false
-    ): Promise<boolean> {
+    async repoExists(owner: string, repo: string): Promise<boolean> {
         // Check KV cache first
         const cacheKey = `repo_exists::${owner}/${repo}`;
         if (this.kv) {
@@ -277,6 +274,20 @@ export class GitHubApp {
                 `Failed to check repo existence: ${checkRes.status}`
             );
         }
+        return false;
+    }
+
+    /**
+     * Ensure a repository exists. If it doesn't, create it using the
+     * GitHub App installation's admin permissions (only when allowCreate is true).
+     */
+    async ensureRepoExists(
+        owner: string,
+        repo: string,
+        allowCreate = false
+    ): Promise<boolean> {
+        const exists = await this.repoExists(owner, repo);
+        if (exists) return true;
 
         // Repo not found — either create or reject based on allowCreate
         if (!allowCreate) {
@@ -285,6 +296,12 @@ export class GitHubApp {
             );
         }
 
+        const cacheKey = `repo_exists::${owner}/${repo}`;
+        const installationId = await this.resolveInstallationId(owner);
+        const adminToken = await this.getInstallationToken(
+            { administration: "write" },
+            installationId
+        );
         const orgRes = await fetch(`https://api.github.com/orgs/${owner}`, {
             headers: {
                 Authorization: `Bearer ${adminToken.token}`,

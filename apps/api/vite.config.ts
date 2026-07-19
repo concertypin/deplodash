@@ -20,6 +20,8 @@ const ignoredDir = [
 const resolve: Config["resolve"] = {
     alias: {
         "@": fileURLToPath(new URL("src", import.meta.url)),
+        "@tests": fileURLToPath(new URL("tests", import.meta.url)),
+        "@root": fileURLToPath(new URL("../..", import.meta.url)),
     },
     external: [],
 };

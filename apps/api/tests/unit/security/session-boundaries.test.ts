@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { TEST_SECRET } from "../../helpers";
+import { TEST_SECRET } from "@tests/helpers";
 import { Hono, type MiddlewareHandler } from "hono";
 import type { HonoEnv, SessionPayload } from "@/types";
 import { sessionMiddleware } from "@/middleware";
 import { getOrInitKey, encryptWith } from "@/crypto";
 import { env } from "cloudflare:workers";
-import { contains } from "../../helpers";
+import { contains } from "@tests/helpers";
 
 const BASE_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,

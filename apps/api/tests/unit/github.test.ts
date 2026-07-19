@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { jsonResponse } from "../helpers";
+import { jsonResponse } from "@tests/helpers";
 import { GitHubClient } from "@/github";
 
 describe("GitHubClient", () => {

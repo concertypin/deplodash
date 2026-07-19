@@ -1,0 +1,16 @@
+{
+    "[javascript][typescript][svelte]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.tabSize": 4
+    },
+    "eslint.workingDirectories": [
+        {
+            "!cwd": false,
+            "directory": "${workspaceFolder}/apps/web"
+        }
+    ],
+    "js/ts.preferences.preferTypeOnlyAutoImports": true,
+    "files.eol": "\n",
+    "js/ts.experimental.useTsgo": false,
+    "oxc.disableNestedConfig": false,
+}

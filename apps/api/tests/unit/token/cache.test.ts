@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { FakeKV } from "../../helpers";
+import { FakeKV } from "@tests/helpers";
 import { TokenService } from "@/token/service";
 
 describe("TokenService — cache & requestToken", () => {

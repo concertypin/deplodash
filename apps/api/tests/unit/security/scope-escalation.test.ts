@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { TEST_SECRET } from "../../helpers";
+import { TEST_SECRET } from "@tests/helpers";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { consentRouter } from "@/routes/consent";

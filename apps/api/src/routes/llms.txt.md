@@ -29,9 +29,12 @@ Request a token for a specific repository with desired permissions.
 ```json
 {
     "repo": "owner/repo-name",
-    "scopes": ["contents:write"]
+    "scopes": ["contents:write"],
+    "repo_mode": "existing-only"
 }
 ```
+
+The optional `repo_mode` field (`"existing-only"` or `"create-if-missing"`) indicates whether the agent intends to create the repository if it does not exist. Default is `"existing-only"`, which never creates a repository. With `"create-if-missing"`, the consent page offers the option to create a private repository, but only after explicit human approval.
 
 **Available scopes:** `contents:read`, `contents:write`, `workflows:write`, `admin`
 
@@ -48,18 +51,17 @@ Request a token for a specific repository with desired permissions.
 
 The returned `effective_scopes` may be narrower than the requested scopes if the repo has only partial consent on record.
 
-**Response (needs consent from user):**
-
 ```json
 {
     "status": "needs_consent",
-    "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite",
+    "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite&repo_mode=existing-only&repo_exists=true",
     "requested_scopes": ["contents:write"],
-    "approved_scopes": ["contents:read"]
+    "approved_scopes": ["contents:read"],
+    "repo_exists": true
 }
 ```
 
-Send the consent URL to the user. Once they approve, retry the request. If the user already approved some compatible scopes, the response may include those as `approved_scopes`.
+The `repo_exists` field indicates whether the repository was found (`true` or `false`). The consent URL also contains `repo_mode` and `repo_exists` query parameters so the UI can render the appropriate actions. When `repo_exists` is `false` and the user selected creation in prior consent, the token will be issued after creating a private repository. When `repo_exists` is `false` and the stored consent mode is `existing-only`, the token request fails with `Repository not found and creation was not approved.`
 
 ### QUERY /api/wait — Wait for User Consent (Long Polling)
 

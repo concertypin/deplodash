@@ -45,3 +45,4 @@ try {
 } catch {
     console.error("❌ Decryption failed — wrong secret or corrupted token.");
 }
+export {};

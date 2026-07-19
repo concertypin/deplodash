@@ -6,20 +6,16 @@ const generatedConfigUrl = new URL(
     "../dist/deplodash/wrangler.json",
     import.meta.url
 );
-const generatedConfigSchema = z
-    .object({
-        assets: z.record(z.string(), z.unknown()).optional(),
-    })
-    .passthrough();
+const generatedConfigSchema = z.looseObject({
+    assets: z.record(z.string(), z.unknown()).optional(),
+});
 const sourceConfigSchema = z.object({
-    assets: z
-        .object({
-            directory: z.string(),
-            binding: z.string(),
-            not_found_handling: z.literal("single-page-application"),
-            run_worker_first: z.literal(true),
-        })
-        .passthrough(),
+    assets: z.looseObject({
+        directory: z.string(),
+        binding: z.string(),
+        not_found_handling: z.literal("single-page-application"),
+        run_worker_first: z.literal(true),
+    }),
 });
 
 const [sourceConfigText, generatedConfigText] = await Promise.all([
