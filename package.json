@@ -8,13 +8,13 @@
         "dev": "concurrently --names API,WEB --prefix-colors blue,green \"pnpm dev:api\" \"pnpm dev:web\"",
         "dev:api": "pnpm --filter @deplodash/api dev",
         "dev:web": "pnpm --filter @deplodash/web dev",
-        "check": "pnpm -r check",
-        "build": "pnpm -r build",
+        "check": "pnpm --parallel -r check",
+        "build": "pnpm --parallel -r build",
         "build:api": "pnpm --filter @deplodash/api build",
         "build:web": "pnpm --filter @deplodash/web build",
-        "test": "pnpm -r test",
-        "lint": "pnpm -r lint",
-        "format": "pnpm -r format"
+        "test": "pnpm --parallel -r test",
+        "lint": "pnpm --parallel -r lint",
+        "format": "pnpm --parallel -r format"
     },
     "devDependencies": {
         "@types/node": "^26.1.1",
