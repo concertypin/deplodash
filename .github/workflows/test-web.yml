@@ -47,11 +47,12 @@ jobs:
   merge-reports:
     if: ${{ !cancelled() }}
     needs: [web-tests]
-    timeout-minutes: 3
+    timeout-minutes: 10
     permissions:
       pull-requests: write
       statuses: write
       contents: read
+      actions: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +68,7 @@ jobs:
           merge-multiple: true
 
       - name: Merge reports
-        run: pnpm --filter @deplodash/web exec vitest --merge-reports=../../.vitest-reports --reporter=github-actions --reporter=default --coverage.reporter=text --coverage.reporter=json-summary
+        run: pnpm --filter @deplodash/web exec vitest --merge-reports=../../.vitest-reports --reporter=github-actions --reporter=default --coverage.enabled --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Update Coverage Status
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && always() }}

@@ -16,7 +16,7 @@
     "scripts": {
         "dev": "vite dev",
         "build": "vite build",
-        "postbuild": "node scripts/configure-worker-assets.mjs",
+        "postbuild": "node scripts/configure-worker-assets.ts",
         "cf-typegen": "wrangler types --env-interface CloudflareBindings",
         "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
         "lint": "pnpm run lint:check --fix",

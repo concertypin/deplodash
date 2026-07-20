@@ -288,7 +288,6 @@ export class GitHubApp {
     ): Promise<boolean> {
         const exists = await this.repoExists(owner, repo);
         if (exists) return true;
-
         // Repo not found — either create or reject based on allowCreate
         if (!allowCreate) {
             throw new Error(
