@@ -73,9 +73,13 @@ describe("scopeCategories", () => {
         expect(new Set(allIds).size).toBe(allIds.length);
     });
 
-    it("approvable scope ids should exclude hidden compound scopes", () => {
+    it("approvableScopeIds contains granular scopes and visible legacy presets", () => {
         expect(approvableScopeIds.has("contents:read")).toBe(true);
-        expect(approvableScopeIds.has("admin")).toBe(false);
+        // admin is a visible scope in the UI categories (not hidden),
+        // so it is included in approvableScopeIds.
+        expect(approvableScopeIds.has("admin")).toBe(true);
+        // contents:write+workflows:write is not in the UI categories,
+        // so it remains excluded.
         expect(approvableScopeIds.has("contents:write+workflows:write")).toBe(
             false
         );

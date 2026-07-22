@@ -218,7 +218,7 @@ describe("POST /api/consent", () => {
         expect(body.status).toBe("ok");
     });
 
-    it("rejects unsupported compound scopes even when originally requested", async () => {
+    it("accepts admin compound scope by expanding into granular scopes", async () => {
         const encValue = await encryptedPayload({
             scopes: "admin",
             repo: "testuser/repo",
@@ -232,12 +232,12 @@ describe("POST /api/consent", () => {
             requested_scopes_enc: encValue,
         });
 
-        expect(resp.status).toBe(400);
+        // admin gets expanded to granular scopes before validation,
+        // so it passes both APPROVABLE_SCOPES and subset checks.
+        expect(resp.status).toBe(200);
         const body = await resp.json();
-        contains(body, "error");
-        expect(body.error).toContain(
-            "Cannot approve unsupported scopes: admin"
-        );
+        contains(body, "status");
+        expect(body.status).toBe("ok");
     });
 
     it("accepts subset approval with encrypted multi-scope request", async () => {
