@@ -54,4 +54,17 @@ describe("expandCompoundScopes", () => {
         const result = expandCompoundScopes([]);
         expect(result).toEqual([]);
     });
+
+    // ─── Regression guards ──────────────────────────────────────────────────
+
+    it("passes through unknown compound scope unchanged (not in LEGACY_PRESETS)", () => {
+        const result = expandCompoundScopes(["unknown:compound"]);
+        expect(result).toEqual(["unknown:compound"]);
+    });
+
+    it("is idempotent — expanding already-expanded scopes produces same result", () => {
+        const once = expandCompoundScopes(["admin"]);
+        const twice = expandCompoundScopes(once);
+        expect([...once].sort()).toEqual([...twice].sort());
+    });
 });

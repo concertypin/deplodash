@@ -44,4 +44,31 @@ describe("permissionsFromScopes", () => {
         const b = permissionsFromScopes(["contents:write", "workflows:write"]);
         expect(a).toEqual(b);
     });
+
+    // ─── Regression guards ──────────────────────────────────────────────────
+    // These tests ensure the individual-scope mapping path stays in sync with
+    // the LEGACY_PRESETS shortcut path. Both must produce identical results.
+
+    it("produces same result for admin via compound and via expanded scopes", () => {
+        const viaPreset = permissionsFromScopes(["admin"]);
+        const viaExpanded = permissionsFromScopes([
+            "administration:write",
+            "contents:write",
+            "workflows:write",
+            "metadata:read",
+        ]);
+        expect(viaExpanded).toEqual(viaPreset);
+    });
+
+    it("produces same result for contents:write+workflows:write via compound and via expanded scopes", () => {
+        const viaPreset = permissionsFromScopes([
+            "contents:write+workflows:write",
+        ]);
+        const viaExpanded = permissionsFromScopes([
+            "contents:write",
+            "workflows:write",
+            "metadata:read",
+        ]);
+        expect(viaExpanded).toEqual(viaPreset);
+    });
 });
