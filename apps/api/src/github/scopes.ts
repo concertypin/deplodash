@@ -214,6 +214,35 @@ export type ScopePreset =
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
+ * Expand compound/preset scopes into their granular components.
+ *
+ * Compound scopes (e.g. "admin" or "contents:write+workflows:write") are
+ * legacy shorthands that expand to sets of individual approvable scopes.
+ * This function resolves them so downstream code (token endpoint, consent
+ * validation) operates on granular scopes only.
+ *
+ * Non-compound scopes pass through unchanged. The result is deduplicated.
+ *
+ * @param scopes — array of scope strings, possibly containing compound presets
+ * @returns array with every compound scope expanded to its constituents
+ */
+export function expandCompoundScopes(scopes: string[]): string[] {
+    const result = new Set<string>();
+    for (const scope of scopes) {
+        const preset = LEGACY_PRESETS[scope];
+        if (preset !== undefined) {
+            const keys = Object.keys(preset);
+            for (const perm of keys) {
+                const level = preset[perm];
+                result.add(`${perm}:${level}`);
+            }
+        } else {
+            result.add(scope);
+        }
+    }
+    return [...result];
+}
+/**
  * Convert a scope array to a GitHub permissions object.
  *
  * Each scope in the array is mapped to its corresponding GitHub permission.
