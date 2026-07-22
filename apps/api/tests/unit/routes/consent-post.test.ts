@@ -218,6 +218,28 @@ describe("POST /api/consent", () => {
         expect(body.status).toBe("ok");
     });
 
+    it("rejects unsupported compound scopes even when originally requested", async () => {
+        const encValue = await encryptedPayload({
+            scopes: "admin",
+            repo: "testuser/repo",
+            agent_id: "test-agent",
+        });
+
+        const resp = await consentPost({
+            repo: "testuser/repo",
+            scopes: "admin",
+            agent_id: "test-agent",
+            requested_scopes_enc: encValue,
+        });
+
+        expect(resp.status).toBe(400);
+        const body = await resp.json();
+        contains(body, "error");
+        expect(body.error).toContain(
+            "Cannot approve unsupported scopes: admin"
+        );
+    });
+
     it("accepts subset approval with encrypted multi-scope request", async () => {
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,

@@ -11,7 +11,7 @@
 /**
  * Map each Deplodash scope to its [GitHub permission name, permission level].
  */
-const SCOPE_TO_GITHUB: Record<string, [string, string]> = {
+export const SCOPE_TO_GITHUB: Record<string, [string, string]> = {
     "contents:read": ["contents", "read"],
     "contents:write": ["contents", "write"],
     "issues:read": ["issues", "read"],
@@ -94,6 +94,8 @@ export const SCOPE_LABELS: Record<string, string> = {
     "checks:read": "View check runs & suites",
     "checks:write": "Create & update check runs",
 };
+
+export const APPROVABLE_SCOPES = new Set(Object.keys(SCOPE_TO_GITHUB));
 
 /**
  * Compound/builtin scopes that are not individual permission scopes

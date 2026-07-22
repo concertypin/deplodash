@@ -17,6 +17,7 @@ import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 import { decryptWith, getOrInitKey } from "@/crypto";
 import { notifyWaiters } from "@/token/wait-notifier";
+import { APPROVABLE_SCOPES } from "@/github/scopes";
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,17 @@ export const consentRouter = new Hono<HonoEnv>()
                               .filter(Boolean)
                 ),
             ];
+            const unsupportedScopes = scopeList.filter(
+                (scope) => !APPROVABLE_SCOPES.has(scope)
+            );
+            if (unsupportedScopes.length > 0) {
+                return c.json(
+                    {
+                        error: `Cannot approve unsupported scopes: ${unsupportedScopes.join(", ")}`,
+                    },
+                    400
+                );
+            }
             // Parse the originally requested scopes once and reuse for both
             // audit tracking and subset validation.
             const requestedList: string[] | undefined =
