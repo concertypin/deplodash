@@ -67,6 +67,11 @@ export const scopeCategories: {
                 id: "administration:write",
                 description: "Manage repository settings",
             },
+            {
+                id: "admin",
+                description:
+                    "Full admin access (contents, workflows, and repository administration)",
+            },
         ],
     },
     {

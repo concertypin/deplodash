@@ -93,6 +93,7 @@ export const SCOPE_LABELS: Record<string, string> = {
     "workflows:write": "Manage workflow files",
     "checks:read": "View check runs & suites",
     "checks:write": "Create & update check runs",
+    admin: "Full admin access (contents, workflows, and repository administration)",
 };
 
 /**
@@ -141,7 +142,7 @@ export const SCOPE_CATEGORIES: Record<
     },
     administration: {
         label: "🔐 Administration",
-        scopes: ["administration:read", "administration:write"],
+        scopes: ["administration:read", "administration:write", "admin"],
     },
     security: {
         label: "🛡️ Security & Access",
