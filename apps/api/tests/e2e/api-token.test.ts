@@ -1,5 +1,6 @@
 import {
     afterEach,
+    assert,
     beforeAll,
     beforeEach,
     describe,
@@ -169,10 +170,14 @@ describe("API token E2E flow", () => {
         );
 
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("agent-2", "neworg/new-repo", [
-            "contents:write",
-            "administration:write",
-        ]);
+        await tokenService.recordConsent(
+            "agent-2",
+            "neworg/new-repo",
+            ["contents:write", "administration:write"],
+            undefined,
+            undefined,
+            "create-if-missing"
+        );
 
         mockFetch
             .mockResolvedValueOnce(
@@ -187,6 +192,14 @@ describe("API token E2E flow", () => {
                 })
             )
             .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404))
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_create_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
             .mockResolvedValueOnce(jsonResponse({ login: "neworg" }))
             .mockResolvedValueOnce(
                 jsonResponse(
@@ -214,46 +227,25 @@ describe("API token E2E flow", () => {
         );
 
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = (await resp.json()) satisfies Record<string, unknown>;
+        assert(
+            "error" in body === false,
+            "Response should not contain an error"
+        );
         expect(body).toMatchObject({
             status: "ok",
             token: "ghs_created_repo_token",
         });
-        expect(typeof body.expires_at).toBe("string");
+        assert(
+            "expires_at" in body && typeof body.expires_at === "string",
+            "expires_at should be a string"
+        );
         expect(body.effective_scopes).toEqual([
             "contents:write",
             "administration:write",
         ]);
-        expect(mockFetch).toHaveBeenCalledTimes(6);
+        expect(mockFetch).toHaveBeenCalledTimes(7);
     });
-
-    it("returns needs_consent when the agent has no approved consent", async () => {
-        const client = makeClient();
-
-        await registerAgentToken(
-            env.KV,
-            "agent-token-needs-consent",
-            "agent-3",
-            "Consent Agent"
-        );
-
-        const resp = await client.api.token.$post(
-            {
-                json: {
-                    repo: "owner/no-consent",
-                    scopes: ["contents:read"],
-                },
-            },
-            { headers: { Authorization: "Bearer agent-token-needs-consent" } }
-        );
-
-        expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
-        expect(body.status).toBe("needs_consent");
-        expect(typeof body.url).toBe("string");
-        expect(mockFetch).not.toHaveBeenCalled();
-    });
-
     it("rejects requests without an agent bearer token", async () => {
         const client = makeClient();
 

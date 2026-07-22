@@ -86,6 +86,9 @@ export type Repo = {
 
 // ─── v2 — GitHub App Token Service Types ─────────────────────────────────────
 
+/** Repository mode — how to handle missing repositories on consent. */
+export type RepositoryMode = "existing-only" | "create-if-missing";
+
 /**
  * GitHub user info returned by GET /user.
  */
@@ -118,11 +121,13 @@ export type ConsentRecord = {
     /** ISO 8601 timestamp of when consent was granted. */
     granted_at: string;
     /** Optional: the agent_id that requested the consent. */
-    agent_id?: string;
+    agent_id?: string | undefined;
     /** Optional: the originally requested scopes (before granular filtering). */
-    requested_scopes?: string;
+    requested_scopes?: string | undefined;
     /** GitHub user login who granted this consent. */
-    granted_by?: string;
+    granted_by?: string | undefined;
+    /** Repository mode at consent time. Omitted defaults to "existing-only". */
+    repo_mode?: RepositoryMode | undefined;
 };
 
 /**
@@ -138,6 +143,8 @@ export type ConsentEntry = {
     granted_by?: string;
     /** Agent ID that this consent was recorded for. */
     agent_id?: string;
+    /** Repository mode at consent time. Omitted defaults to "existing-only". */
+    repo_mode?: RepositoryMode;
 };
 
 /**

@@ -1,6 +1,6 @@
-{
-    "$schema": "../../node_modules/oxlint/configuration_schema.json",
-    "rules": {
+import { defineConfig } from "oxlint";
+export default defineConfig({
+    rules: {
         "@typescript-eslint/await-thenable": "error",
         "@typescript-eslint/ban-ts-comment": "error",
         "@typescript-eslint/no-array-delete": "error",
@@ -97,7 +97,9 @@
         "preserve-caught-error": "error",
         "require-yield": "error",
         "use-isnan": "error",
-        "valid-typeof": "error"
+        "valid-typeof": "error",
+
+        "typescript/no-deprecated": "error",
     },
-    "categories": {}
-}
+    categories: {},
+});

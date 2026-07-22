@@ -26,6 +26,9 @@ const consentSchema = z.object({
     requested_scopes: z.string().optional(),
     requested_scopes_enc: z.string().optional(),
     agent_id: z.string().min(1).optional(),
+    repo_mode: z
+        .enum(["existing-only", "create-if-missing"])
+        .default("existing-only"),
 });
 
 const revokeSchema = z.object({
@@ -67,6 +70,7 @@ export const consentRouter = new Hono<HonoEnv>()
             requested_scopes: rawRequestedScopes,
             requested_scopes_enc,
             agent_id,
+            repo_mode,
         } = c.req.valid("json");
         // CSRF protection — validate Origin header
         const origin = c.req.header("Origin");
@@ -101,6 +105,10 @@ export const consentRouter = new Hono<HonoEnv>()
                     repo: z.string().min(1),
                     agent_id: z.string().min(1),
                     scopes: z.string().min(1),
+                    repo_mode: z
+                        .enum(["existing-only", "create-if-missing"])
+                        .optional(),
+                    repo_exists: z.boolean().optional(),
                 });
                 const ctx = consentContextSchema.parse(JSON.parse(decrypted));
                 // Verify repo binding — prevents cross-repo replay
@@ -217,7 +225,8 @@ export const consentRouter = new Hono<HonoEnv>()
                     repo,
                     [scope],
                     requestedList ?? undefined,
-                    grantedBy
+                    grantedBy,
+                    repo_mode
                 );
             }
             console.log(

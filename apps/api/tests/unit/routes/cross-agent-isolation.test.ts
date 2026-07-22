@@ -7,7 +7,7 @@ import {
     beforeEach,
     afterEach,
 } from "vitest";
-import { jsonResponse } from "../../helpers";
+import { jsonResponse } from "@tests/helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -80,6 +80,21 @@ describe("Cross-agent consent isolation", () => {
             "contents:read",
         ]);
 
+        // mockFetch will be called by repoExists check before needs_consent response
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 77, account: { login: "shared" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(jsonResponse({ name: "repo" }));
+
         const app = new Hono<HonoEnv>().route("/api", tokenRouter);
         const client = testClient(app, {
             ...BASE_ENV,
@@ -93,7 +108,8 @@ describe("Cross-agent consent isolation", () => {
         expect(resp.status).toBe(202);
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("needs_consent");
-        expect(mockFetch).not.toHaveBeenCalled();
+        // fetch is called for repo existence check (3 calls), not for creation
+        expect(mockFetch).toHaveBeenCalledTimes(3);
     });
 
     it("Agent A's token request succeeds with own consent", async () => {

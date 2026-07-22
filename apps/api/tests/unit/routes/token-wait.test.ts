@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
 import { tokenRouter } from "@/routes/token";

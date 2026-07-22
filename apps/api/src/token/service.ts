@@ -7,7 +7,7 @@
 import { ConsentService } from "@/token/consent-service";
 import { getCachedToken, cacheToken } from "@/token/cache";
 import { encryptWith, getOrInitKey } from "@/crypto";
-
+import type { RepositoryMode } from "@/types";
 // ─── Result type ─────────────────────────────────────────────────────────────
 
 export type TokenRequestResult =
@@ -60,20 +60,35 @@ export class TokenService {
         repo: string,
         scopes: string[],
         requestedScopes?: string[],
-        grantedBy?: string
+        grantedBy?: string,
+        repoMode: RepositoryMode = "existing-only"
     ): Promise<void> {
         return this.consentService.recordConsent(
             agentId,
             repo,
             scopes,
             requestedScopes,
-            grantedBy
+            grantedBy,
+            repoMode
         );
     }
 
     /** @see ConsentService.listConsents */
     listConsents(grantedBy?: string) {
         return this.consentService.listConsents(grantedBy);
+    }
+
+    /** @see ConsentService.getConsentRepositoryMode */
+    getConsentRepositoryMode(
+        agentId: string,
+        repo: string,
+        effectiveScopes: string[]
+    ): Promise<RepositoryMode> {
+        return this.consentService.getConsentRepositoryMode(
+            agentId,
+            repo,
+            effectiveScopes
+        );
     }
 
     /** @see ConsentService.revokeConsent */
@@ -128,6 +143,8 @@ export class TokenService {
             baseUrl: string;
             agentId: string;
             encryptionSecret?: string;
+            repoMode?: RepositoryMode;
+            repoExists?: boolean;
         },
         getToken: (
             effectiveScopes: string[]
@@ -180,11 +197,18 @@ export class TokenService {
                             scopes: scopes.join(","),
                             repo,
                             agent_id: params.agentId,
+                            repo_mode: params.repoMode ?? "existing-only",
+                            repo_exists: params.repoExists ?? true,
                         }),
                         "consent-request"
                     );
                     consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
                 }
+
+                // Add repo_mode and repo_exists to the URL for the consent UI
+                consentUrl += `&repo_mode=${encodeURIComponent(params.repoMode ?? "existing-only")}`;
+                consentUrl += `&repo_exists=${params.repoExists ?? true}`;
+
                 return {
                     status: "needs_consent",
                     url: consentUrl,

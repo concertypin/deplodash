@@ -9,6 +9,7 @@ type Config = Required<UserConfig>;
 const resolve: Config["resolve"] = {
     alias: {
         "@": fileURLToPath(new URL("src", import.meta.url)),
+        "@root": fileURLToPath(new URL("../..", import.meta.url)),
     },
 };
 
@@ -88,6 +89,9 @@ export default defineConfig({
             "/openapi.json": proxyTarget,
             "/docs": proxyTarget,
         },
+    },
+    optimizeDeps: {
+        include: ["hono/client", "phosphor-svelte"],
     },
     test: testConfig,
 });
