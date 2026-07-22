@@ -106,6 +106,14 @@ export const userRouter = new Hono<HonoEnv>()
             const user = await client.getUser();
             const { agent_id, label } = c.req.valid("json");
 
+            const allTokens = await listAgentTokens(c.env.KV);
+            const duplicate = allTokens.some(
+                (t) => t.info.agent_id === agent_id
+            );
+            if (duplicate) {
+                return c.json({ error: "Agent ID already exists" }, 409);
+            }
+
             const token = randomBytes(24);
             await registerAgentToken(
                 c.env.KV,
