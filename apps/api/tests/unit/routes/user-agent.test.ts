@@ -200,6 +200,32 @@ describe("User agent token management", () => {
             expect(body.info.label).toBe("minimal-agent");
         });
 
+        it("rejects duplicate agent_id across users", async () => {
+            await registerAgentToken(
+                env.KV,
+                "existing-owner-token",
+                "shared-agent",
+                "Existing Agent",
+                "anotheruser"
+            );
+
+            const { app, authEnv } = makeApp();
+            const resp = await app.request(
+                "/api/user/agent/create",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ agent_id: "shared-agent" }),
+                },
+                authEnv
+            );
+
+            expect(resp.status).toBe(409);
+            expect(await resp.json()).toEqual({
+                error: "Agent ID already exists",
+            });
+        });
+
         it("rejects empty agent_id", async () => {
             const { app, authEnv } = makeApp();
             const resp = await app.request(
