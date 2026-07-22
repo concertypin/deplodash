@@ -7,6 +7,7 @@ import { tokenRouter } from "@/routes/token";
 import { TokenService } from "@/token/service";
 import { env } from "cloudflare:workers";
 import { registerAgentToken } from "@/middleware/agent-auth";
+import * as z from "zod";
 
 const mockRateLimiter = {
     limit: vi.fn<(_options: { key: string }) => Promise<{ success: boolean }>>(
@@ -118,9 +119,15 @@ describe("POST /api/token — Full grant flow", () => {
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it("returns 200 with token for repo with admin scope", async () => {
+    it("returns 200 with token for expanded admin scopes", async () => {
         const tokenService = new TokenService(env.KV);
-        await tokenService.recordConsent("test-agent", "admin/repo", ["admin"]);
+        // admin expands to these granular scopes at the token endpoint
+        await tokenService.recordConsent("test-agent", "admin/repo", [
+            "administration:write",
+            "contents:write",
+            "workflows:write",
+            "metadata:read",
+        ]);
         mockFetch
             .mockResolvedValueOnce(
                 jsonResponse({ id: 999, account: { login: "admin" } })
@@ -153,10 +160,15 @@ describe("POST /api/token — Full grant flow", () => {
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
-        const body = (await resp.json()) as Record<string, unknown>;
-        expect(body.status).toBe("ok");
+        const tokenResponseSchema = z.object({
+            status: z.literal("ok"),
+            token: z.string(),
+            expires_at: z.string(),
+            effective_scopes: z.array(z.string()).optional(),
+        });
+        const body = tokenResponseSchema.parse(await resp.json());
+        expect(typeof body.token).toBe("string");
     });
-
     it("creates repo and issues token when repo does not exist", async () => {
         const tokenService = new TokenService(env.KV);
         await tokenService.recordConsent("test-agent", "neworg/new-repo", [

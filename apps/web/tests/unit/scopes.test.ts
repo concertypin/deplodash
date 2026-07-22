@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scopeCategories } from "@/lib/scopes";
+import { approvableScopeIds, scopeCategories } from "@/lib/scopes";
 
 describe("scopeCategories", () => {
     it("should have 9 categories", () => {
@@ -71,5 +71,17 @@ describe("scopeCategories", () => {
             c.scopes.map((s) => s.id)
         );
         expect(new Set(allIds).size).toBe(allIds.length);
+    });
+
+    it("approvableScopeIds contains granular scopes and visible legacy presets", () => {
+        expect(approvableScopeIds.has("contents:read")).toBe(true);
+        // admin is a visible scope in the UI categories (not hidden),
+        // so it is included in approvableScopeIds.
+        expect(approvableScopeIds.has("admin")).toBe(true);
+        // contents:write+workflows:write is not in the UI categories,
+        // so it remains excluded.
+        expect(approvableScopeIds.has("contents:write+workflows:write")).toBe(
+            false
+        );
     });
 });

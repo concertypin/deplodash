@@ -218,6 +218,28 @@ describe("POST /api/consent", () => {
         expect(body.status).toBe("ok");
     });
 
+    it("accepts admin compound scope by expanding into granular scopes", async () => {
+        const encValue = await encryptedPayload({
+            scopes: "admin",
+            repo: "testuser/repo",
+            agent_id: "test-agent",
+        });
+
+        const resp = await consentPost({
+            repo: "testuser/repo",
+            scopes: "admin",
+            agent_id: "test-agent",
+            requested_scopes_enc: encValue,
+        });
+
+        // admin gets expanded to granular scopes before validation,
+        // so it passes both APPROVABLE_SCOPES and subset checks.
+        expect(resp.status).toBe(200);
+        const body = await resp.json();
+        contains(body, "status");
+        expect(body.status).toBe("ok");
+    });
+
     it("accepts subset approval with encrypted multi-scope request", async () => {
         const authEnv: HonoEnv["Bindings"] = {
             ...BASE_ENV,

@@ -17,6 +17,7 @@ import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 import { decryptWith, getOrInitKey } from "@/crypto";
 import { notifyWaiters } from "@/token/wait-notifier";
+import { APPROVABLE_SCOPES, expandCompoundScopes } from "@/github/scopes";
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,23 @@ export const consentRouter = new Hono<HonoEnv>()
                               .filter(Boolean)
                 ),
             ];
+            // Expand compound scopes (e.g. "admin") into granular components
+            // before validation, so the APPROVABLE_SCOPES and subset checks
+            // operate on individual approvable scopes only.
+            const expandedList = expandCompoundScopes(scopeList);
+            scopeList.length = 0;
+            scopeList.push(...expandedList);
+            const unsupportedScopes = scopeList.filter(
+                (scope) => !APPROVABLE_SCOPES.has(scope)
+            );
+            if (unsupportedScopes.length > 0) {
+                return c.json(
+                    {
+                        error: `Cannot approve unsupported scopes: ${unsupportedScopes.join(", ")}`,
+                    },
+                    400
+                );
+            }
             // Parse the originally requested scopes once and reuse for both
             // audit tracking and subset validation.
             const requestedList: string[] | undefined =
@@ -170,10 +188,17 @@ export const consentRouter = new Hono<HonoEnv>()
                           .map((s) => s.trim())
                           .filter(Boolean)
                     : undefined;
+            // Also expand compound scopes in the requested list so that
+            // subset validation remains correct even when the original token
+            // endpoint did not expand them (e.g. legacy encrypted payloads).
+            const expandedRequested =
+                requestedList !== undefined
+                    ? expandCompoundScopes(requestedList)
+                    : undefined;
             // Validate that approved scopes are a subset of the originally requested scopes.
-            if (requestedList) {
+            if (expandedRequested) {
                 const invalidScopes = scopeList.filter(
-                    (s) => !requestedList.includes(s)
+                    (s) => !expandedRequested.includes(s)
                 );
                 if (invalidScopes.length > 0) {
                     return c.json(

@@ -20,7 +20,7 @@ import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { encryptWith, getOrInitKey } from "@/crypto";
-import { permissionsFromScopes } from "@/github/scopes";
+import { expandCompoundScopes, permissionsFromScopes } from "@/github/scopes";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,8 @@ const requestTokenSchema = z
     })
     .transform(({ repo, scopes }) => {
         const [owner, name] = repo.split("/");
-        return { repo, owner: owner!, name: name!, scopes };
+        const normalized = expandCompoundScopes(scopes);
+        return { repo, owner: owner!, name: name!, scopes: normalized };
     });
 
 const tokenResponseSchema = z.object({

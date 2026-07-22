@@ -109,3 +109,9 @@ export const scopeCategories: {
         ],
     },
 ];
+
+export const approvableScopeIds = new Set(
+    scopeCategories.flatMap((category) =>
+        category.scopes.map((scope) => scope.id)
+    )
+);

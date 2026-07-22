@@ -70,4 +70,51 @@ describe("POST /api/token (authenticated, needs consent)", () => {
         expect(body.url).toContain("agent_id=test-agent");
         expect(body.requested_scopes_enc).toBeDefined();
     });
+
+    it("expands compound admin scope into granular scopes in consent URL", async () => {
+        const resp = await client.api.token.$post(
+            {
+                json: { repo: "owner/repo", scopes: ["admin"] },
+            },
+            { headers: { Authorization: "Bearer test-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const body = z
+            .object({
+                status: z.literal("needs_consent"),
+                url: z.string(),
+                requested_scopes: z.array(z.string()).optional(),
+            })
+            .parse(await resp.json());
+        // URL should contain expanded granular scopes, not "admin"
+        expect(body.url).not.toContain("scopes=admin");
+        expect(body.url).toContain("administration%3Awrite");
+        expect(body.url).toContain("contents%3Awrite");
+        expect(body.url).toContain("workflows%3Awrite");
+    });
+
+    it("expands contents:write+workflows:write compound scope in consent URL", async () => {
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:write+workflows:write"],
+                },
+            },
+            { headers: { Authorization: "Bearer test-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const body = z
+            .object({
+                status: z.literal("needs_consent"),
+                url: z.string(),
+            })
+            .parse(await resp.json());
+        // URL should contain expanded scopes, not the compound preset
+        expect(body.url).not.toContain(
+            "scopes=contents%3Awrite%2Bworkflows%3Awrite"
+        );
+        expect(body.url).toContain("contents%3Awrite");
+        expect(body.url).toContain("workflows%3Awrite");
+    });
 });
