@@ -49,12 +49,21 @@ describe("scopeCategories", () => {
         expect(total).toBeGreaterThanOrEqual(24);
     });
 
-    it("all scope ids should match the pattern word:word", () => {
+    it("all scope ids should be named permission scopes or legacy presets", () => {
         for (const cat of scopeCategories) {
             for (const scope of cat.scopes) {
-                expect(scope.id).toMatch(/^[a-z]+:[a-z]+$/);
+                expect(scope.id).toMatch(/^[a-z]+:[a-z]+$|^admin$/);
             }
         }
+    });
+
+    it("describes the legacy admin preset explicitly", () => {
+        const scopes = scopeCategories.flatMap((c) => c.scopes);
+        expect(scopes).toContainEqual({
+            id: "admin",
+            description:
+                "Full admin access (contents, workflows, and repository administration)",
+        });
     });
 
     it("should not have duplicate scope ids across categories", () => {
