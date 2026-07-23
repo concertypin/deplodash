@@ -44,17 +44,25 @@ app.get(
 );
 
 app.notFound((c) => {
-    const pathname = c.req.path;
-    if (
-        apiPathPattern.test(pathname) ||
-        (c.req.method !== "GET" && c.req.method !== "HEAD")
-    ) {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
         return c.text("Not Found", 404);
     }
 
-    const assets = c.env.ASSETS;
-    if (!assets) return c.text("Static assets binding unavailable", 500);
-    return assets.fetch(c.req.raw);
+    const pathname = c.req.path;
+    if (apiPathPattern.test(pathname)) {
+        return c.text("Not Found", 404);
+    }
+
+    // SPA routes — serve index.html so the SPA handles client-side routing
+    if (pathname === "/" || pathname === "/auth/consent") {
+        const assets = c.env.ASSETS;
+        if (!assets) return c.text("Static assets binding unavailable", 500);
+        const url = new URL(c.req.url);
+        url.pathname = "/index.html";
+        return assets.fetch(new Request(url, c.req.raw));
+    }
+
+    return c.text("Not Found", 404);
 });
 
 export default app;

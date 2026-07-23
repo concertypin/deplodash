@@ -1,13 +1,11 @@
 <script lang="ts">
-    import Router from "svelte-spa-router";
+    import { route } from "@/lib/router.svelte";
     import HomePage from "@/lib/HomePage.svelte";
     import ConsentPage from "@/lib/ConsentPage.svelte";
-
-    const routes = {
-        "/": HomePage,
-        "/auth/consent": ConsentPage,
-        "*": HomePage,
-    };
 </script>
 
-<Router {routes} />
+{#if route.current === "/auth/consent"}
+    <ConsentPage />
+{:else}
+    <HomePage />
+{/if}
