@@ -44,17 +44,24 @@ app.get(
 );
 
 app.notFound((c) => {
-    const pathname = c.req.path;
-    if (
-        apiPathPattern.test(pathname) ||
-        (c.req.method !== "GET" && c.req.method !== "HEAD")
-    ) {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
         return c.text("Not Found", 404);
     }
 
-    const assets = c.env.ASSETS;
-    if (!assets) return c.text("Static assets binding unavailable", 500);
-    return assets.fetch(c.req.raw);
+    const pathname = c.req.path;
+    if (apiPathPattern.test(pathname)) {
+        return c.text("Not Found", 404);
+    }
+
+    // SPA routes — pass through to the ASSETS binding;
+    // Cloudflare Pages handles the 404 → index.html fallback internally.
+    if (pathname === "/" || pathname === "/auth/consent") {
+        const assets = c.env.ASSETS;
+        if (!assets) return c.text("Static assets binding unavailable", 500);
+        return assets.fetch(c.req.raw);
+    }
+
+    return c.text("Not Found", 404);
 });
 
 export default app;
