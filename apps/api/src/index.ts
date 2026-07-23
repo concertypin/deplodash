@@ -53,13 +53,12 @@ app.notFound((c) => {
         return c.text("Not Found", 404);
     }
 
-    // SPA routes — serve index.html so the SPA handles client-side routing
+    // SPA routes — pass through to the ASSETS binding;
+    // Cloudflare Pages handles the 404 → index.html fallback internally.
     if (pathname === "/" || pathname === "/auth/consent") {
         const assets = c.env.ASSETS;
         if (!assets) return c.text("Static assets binding unavailable", 500);
-        const url = new URL(c.req.url);
-        url.pathname = "/index.html";
-        return assets.fetch(new Request(url, c.req.raw));
+        return assets.fetch(c.req.raw);
     }
 
     return c.text("Not Found", 404);
