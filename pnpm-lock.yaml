@@ -87,9 +87,6 @@ importers:
       svelte:
         specifier: ^5.56.5
         version: 5.56.5(@typescript-eslint/types@8.64.0)
-      svelte-spa-router:
-        specifier: ^5.1.1
-        version: 5.1.1(svelte@5.56.5(@typescript-eslint/types@8.64.0))
       tailwindcss:
         specifier: ^4.3.2
         version: 4.3.2
@@ -2063,10 +2060,6 @@ packages:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
 
-  regexparam@2.0.2:
-    resolution: {integrity: sha512-A1PeDEYMrkLrfyOwv2jwihXbo9qxdGD3atBYQA9JJgreAx8/7rC6IUkWOw2NQlOxLp2wL0ifQbh1HuidDfYA6w==}
-    engines: {node: '>=8'}
-
   rolldown@1.1.5:
     resolution: {integrity: sha512-t9z29cJjXf/vxQ8dyhCSpt6H6aSwHTk8cT5I3iy6SMXuFpk5mB6PL6XfC8PCwrPTx93udwKUm9HRteAlTGBLiA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -2157,11 +2150,6 @@ packages:
     peerDependenciesMeta:
       svelte:
         optional: true
-
-  svelte-spa-router@5.1.1:
-    resolution: {integrity: sha512-/9PiiyS2jQIXlP+NlKRcPl/Bgwm6WTCTmJq8TZw5IShEbozwcfpX2V3YEL4lAVgJJ2Ni+ipAH7aYVEupeNwtHA==}
-    peerDependencies:
-      svelte: ^5.0.0
 
   svelte@5.56.5:
     resolution: {integrity: sha512-P03YJmUy2JoOxYHb4Ka3oFat1hq2ko2it1MOItSjsJ4B6WgZPLc3+RyyU+57OGWhs3Ieq74EJpZtSnNXdAGgDw==}
@@ -4051,8 +4039,6 @@ snapshots:
 
   readdirp@4.1.2: {}
 
-  regexparam@2.0.2: {}
-
   rolldown@1.1.5:
     dependencies:
       '@oxc-project/types': 0.139.0
@@ -4180,11 +4166,6 @@ snapshots:
       postcss-selector-parser: 7.1.4
       semver: 7.8.5
     optionalDependencies:
-      svelte: 5.56.5(@typescript-eslint/types@8.64.0)
-
-  svelte-spa-router@5.1.1(svelte@5.56.5(@typescript-eslint/types@8.64.0)):
-    dependencies:
-      regexparam: 2.0.2
       svelte: 5.56.5(@typescript-eslint/types@8.64.0)
 
   svelte@5.56.5(@typescript-eslint/types@8.64.0):
