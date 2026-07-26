@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { TEST_SECRET } from "../helpers";
+import { TEST_SECRET } from "@tests/helpers";
 import { testClient } from "hono/testing";
 import { router } from "@/route";
 import { Hono } from "hono";
