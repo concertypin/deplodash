@@ -1,6 +1,6 @@
 <script lang="ts">
     import { client } from "@/lib/api";
-    import { scopeCategories } from "@/lib/scopes";
+    import { approvableScopeIds, scopeCategories } from "@/lib/scopes";
     import { SvelteSet } from "svelte/reactivity";
 
     const params = new URLSearchParams(window.location.search);
@@ -13,7 +13,7 @@
         scopes
             .split(",")
             .map((s) => s.trim())
-            .filter(Boolean)
+            .filter((scope) => approvableScopeIds.has(scope))
     );
     let error = $state<string | null>(null);
 

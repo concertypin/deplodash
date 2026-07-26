@@ -67,6 +67,11 @@ export const scopeCategories: {
                 id: "administration:write",
                 description: "Manage repository settings",
             },
+            {
+                id: "admin",
+                description:
+                    "Full admin access (contents, workflows, and repository administration)",
+            },
         ],
     },
     {
@@ -104,3 +109,9 @@ export const scopeCategories: {
         ],
     },
 ];
+
+export const approvableScopeIds = new Set(
+    scopeCategories.flatMap((category) =>
+        category.scopes.map((scope) => scope.id)
+    )
+);

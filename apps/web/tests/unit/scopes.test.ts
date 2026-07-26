@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scopeCategories } from "@/lib/scopes";
+import { approvableScopeIds, scopeCategories } from "@/lib/scopes";
 
 describe("scopeCategories", () => {
     it("should have 9 categories", () => {
@@ -49,12 +49,21 @@ describe("scopeCategories", () => {
         expect(total).toBeGreaterThanOrEqual(24);
     });
 
-    it("all scope ids should match the pattern word:word", () => {
+    it("all scope ids should be named permission scopes or legacy presets", () => {
         for (const cat of scopeCategories) {
             for (const scope of cat.scopes) {
-                expect(scope.id).toMatch(/^[a-z]+:[a-z]+$/);
+                expect(scope.id).toMatch(/^[a-z]+:[a-z]+$|^admin$/);
             }
         }
+    });
+
+    it("describes the legacy admin preset explicitly", () => {
+        const scopes = scopeCategories.flatMap((c) => c.scopes);
+        expect(scopes).toContainEqual({
+            id: "admin",
+            description:
+                "Full admin access (contents, workflows, and repository administration)",
+        });
     });
 
     it("should not have duplicate scope ids across categories", () => {
@@ -62,5 +71,17 @@ describe("scopeCategories", () => {
             c.scopes.map((s) => s.id)
         );
         expect(new Set(allIds).size).toBe(allIds.length);
+    });
+
+    it("approvableScopeIds contains granular scopes and visible legacy presets", () => {
+        expect(approvableScopeIds.has("contents:read")).toBe(true);
+        // admin is a visible scope in the UI categories (not hidden),
+        // so it is included in approvableScopeIds.
+        expect(approvableScopeIds.has("admin")).toBe(true);
+        // contents:write+workflows:write is not in the UI categories,
+        // so it remains excluded.
+        expect(approvableScopeIds.has("contents:write+workflows:write")).toBe(
+            false
+        );
     });
 });
