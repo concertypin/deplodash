@@ -144,7 +144,6 @@ export class TokenService {
             agentId: string;
             encryptionSecret?: string;
             repoMode?: RepositoryMode;
-            repoExists?: boolean;
         },
         getToken: (
             effectiveScopes: string[]
@@ -198,16 +197,14 @@ export class TokenService {
                             repo,
                             agent_id: params.agentId,
                             repo_mode: params.repoMode ?? "existing-only",
-                            repo_exists: params.repoExists ?? true,
                         }),
                         "consent-request"
                     );
                     consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
                 }
 
-                // Add repo_mode and repo_exists to the URL for the consent UI
+                // Add repository mode to the consent URL for the consent UI.
                 consentUrl += `&repo_mode=${encodeURIComponent(params.repoMode ?? "existing-only")}`;
-                consentUrl += `&repo_exists=${params.repoExists ?? true}`;
 
                 return {
                     status: "needs_consent",

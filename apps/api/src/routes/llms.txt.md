@@ -34,7 +34,7 @@ Request a token for a specific repository with desired permissions.
 }
 ```
 
-The optional `repo_mode` field (`"existing-only"` or `"create-if-missing"`) indicates whether the agent intends to create the repository if it does not exist. Default is `"existing-only"`, which never creates a repository. With `"create-if-missing"`, the consent page offers the option to create a private repository, but only after explicit human approval.
+The optional `repo_mode` field (`"existing-only"` or `"create-if-missing"`) indicates whether the agent intends to create the repository if it does not exist. Default is `"existing-only"`, which never creates a repository. With `"create-if-missing"`, the consent page offers the option to create a private repository, but only after explicit human approval. Repository existence is not reported before consent.
 
 **Available scopes:** `contents:read`, `contents:write`, `workflows:write`, `admin`
 
@@ -54,14 +54,13 @@ The returned `effective_scopes` may be narrower than the requested scopes if the
 ```json
 {
     "status": "needs_consent",
-    "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite&repo_mode=existing-only&repo_exists=true",
+    "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite&repo_mode=existing-only",
     "requested_scopes": ["contents:write"],
-    "approved_scopes": ["contents:read"],
-    "repo_exists": true
+    "approved_scopes": ["contents:read"]
 }
 ```
 
-The `repo_exists` field indicates whether the repository was found (`true` or `false`). The consent URL also contains `repo_mode` and `repo_exists` query parameters so the UI can render the appropriate actions. When `repo_exists` is `false` and the user selected creation in prior consent, the token will be issued after creating a private repository. When `repo_exists` is `false` and the stored consent mode is `existing-only`, the token request fails with `Repository not found and creation was not approved.`
+The consent URL contains `repo_mode`, but never reports repository existence before human approval. A token request with `repo_mode: "create-if-missing"` can create a private repository only when both the current request and the human's stored consent use `"create-if-missing"`. If the repository is missing and either condition is not met, the token request fails with `Repository not found and creation was not approved.`
 
 ### QUERY /api/wait — Wait for User Consent (Long Polling)
 

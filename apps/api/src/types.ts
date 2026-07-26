@@ -164,6 +164,8 @@ export type SessionPayload = {
     accessExpiresAt: number;
     /** Refresh token expiry as epoch milliseconds. */
     refreshExpiresAt: number;
+    /** Session schema version; v2 includes the read:org OAuth scope. */
+    v: 2;
 };
 
 export type CachedToken = {

@@ -221,6 +221,7 @@ describe("API token E2E flow", () => {
                 json: {
                     repo: "neworg/new-repo",
                     scopes: ["contents:write", "administration:write"],
+                    repo_mode: "create-if-missing",
                 },
             },
             { headers: { Authorization: "Bearer agent-token-create" } }

@@ -54,7 +54,7 @@ async function assertApproverCanGrantConsent(
     if (await ghClient.checkRepoAdmin(owner, name)) return;
 
     // 2. If repo doesn't exist, user must own the target namespace or be an org owner.
-    if (owner === username) return;
+    if (owner.toLowerCase() === username.toLowerCase()) return;
     if (await ghClient.checkOrgAdmin(owner, username)) return;
 
     throw new Error(
@@ -82,6 +82,7 @@ export const consentRouter = new Hono<HonoEnv>()
         // When ENCRYPTION_SECRET is configured but no encrypted field is submitted,
         // the request is rejected (prevents subset-validation bypass).
         let requested_scopes = rawRequestedScopes;
+        let consentRepo = repo;
         if (c.env.ENCRYPTION_SECRET) {
             if (!requested_scopes_enc) {
                 return c.json(
@@ -108,17 +109,17 @@ export const consentRouter = new Hono<HonoEnv>()
                     repo_mode: z
                         .enum(["existing-only", "create-if-missing"])
                         .optional(),
-                    repo_exists: z.boolean().optional(),
                 });
                 const ctx = consentContextSchema.parse(JSON.parse(decrypted));
                 // Verify repo binding — prevents cross-repo replay
-                if (ctx.repo !== repo) {
+                if (ctx.repo.toLowerCase() !== repo.toLowerCase()) {
                     throw new Error("Repo mismatch");
                 }
                 // Verify agent_id binding — prevents cross-agent redirect
                 if (ctx.agent_id !== agent_id) {
                     throw new Error("Agent mismatch");
                 }
+                consentRepo = ctx.repo;
                 requested_scopes = ctx.scopes;
             } catch {
                 return c.json(
@@ -206,7 +207,11 @@ export const consentRouter = new Hono<HonoEnv>()
             }
             // Verify the user has administrative authority on the repository
             try {
-                await assertApproverCanGrantConsent(ghClient, grantedBy, repo);
+                await assertApproverCanGrantConsent(
+                    ghClient,
+                    grantedBy,
+                    consentRepo
+                );
             } catch (err: unknown) {
                 return c.json(
                     {
@@ -222,7 +227,7 @@ export const consentRouter = new Hono<HonoEnv>()
             for (const scope of scopeList) {
                 await tokenService.recordConsent(
                     agent_id ?? "",
-                    repo,
+                    consentRepo,
                     [scope],
                     requestedList ?? undefined,
                     grantedBy,
@@ -230,12 +235,12 @@ export const consentRouter = new Hono<HonoEnv>()
                 );
             }
             console.log(
-                `GRANT: repo=${repo} scopeList=${JSON.stringify(
+                `GRANT: repo=${consentRepo} scopeList=${JSON.stringify(
                     scopeList
                 )} scopes=${String(rawScopes ?? "")} grantedBy=${grantedBy}`
             );
             // Notify any waiters that consent has been granted
-            notifyWaiters(repo, agent_id ?? "");
+            notifyWaiters(consentRepo, agent_id ?? "");
             return c.json({ status: "ok" });
         } catch (err: unknown) {
             console.error("consent: failed to grant consent", err);

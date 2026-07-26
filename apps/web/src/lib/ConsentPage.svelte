@@ -8,8 +8,6 @@
     const scopes = params.get("scopes") ?? "";
     const agentId = params.get("agent_id");
     const requestedScopesEnc = params.get("requested_scopes_enc");
-    const repoExists = params.get("repo_exists") !== "false";
-    const repoMode = params.get("repo_mode") ?? "existing-only";
 
     let selectedScopes = new SvelteSet(
         scopes
@@ -144,25 +142,6 @@
                     with the following permissions:
                 </p>
 
-                {#if !repoExists}
-                    <div
-                        class="bg-warning/10 border border-warning/20 text-warning rounded-box p-3 mb-4 text-sm"
-                        role="alert"
-                    >
-                        <p class="font-semibold mb-1">Repository not found</p>
-                        <p>
-                            The repository <strong>{repo}</strong> does not exist
-                            yet. If you grant access without creating it, the agent
-                            may receive an error when trying to use the token.
-                        </p>
-                        {#if repoMode === "create-if-missing"}
-                            <p class="mt-2 text-xs opacity-75">
-                                The agent requested repository creation, but you
-                                can choose any option below.
-                            </p>
-                        {/if}
-                    </div>
-                {/if}
 
                 {#if scopes}
                     <div
@@ -224,28 +203,19 @@
                 {/if}
 
                 <div class="flex gap-3">
-                    {#if !repoExists}
-                        <button
-                            onclick={() => handleGrant("existing-only")}
-                            class="btn btn-outline flex-1"
-                        >
-                            Allow without creating repository
-                        </button>
-                        <button
-                            onclick={() => handleGrant("create-if-missing")}
-                            class="btn btn-neutral flex-1"
-                            title="This will create {repo} as a private repository and connect it to deplodash."
-                        >
-                            Create private repo &amp; allow
-                        </button>
-                    {:else}
-                        <button
-                            onclick={() => handleGrant("existing-only")}
-                            class="btn btn-neutral flex-1"
-                        >
-                            Grant Access
-                        </button>
-                    {/if}
+                    <button
+                        onclick={() => handleGrant("existing-only")}
+                        class="btn btn-neutral flex-1"
+                    >
+                        Grant Access
+                    </button>
+                    <button
+                        onclick={() => handleGrant("create-if-missing")}
+                        class="btn btn-outline flex-1"
+                        title="Create {repo} as a private repository only if it is missing."
+                    >
+                        Create private repo &amp; allow
+                    </button>
                     <button onclick={handleDeny} class="btn btn-ghost flex-1">
                         Cancel
                     </button>

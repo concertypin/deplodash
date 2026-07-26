@@ -460,6 +460,35 @@ describe("POST /api/consent", () => {
         contains(body, "status");
         expect(body.status).toBe("ok");
     });
+    it("accepts a mixed-case personal-owner repository", async () => {
+        const resp = await consentPost({
+            repo: "TestUser/my-repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+        });
+        expect(resp.status).toBe(200);
+    });
+
+    it("accepts repository casing differences between form and encrypted context", async () => {
+        const encValue = await encryptedPayload({
+            scopes: "contents:read",
+            repo: "TestUser/My-Repo",
+            agent_id: "test-agent",
+        });
+        const resp = await consentPost({
+            repo: "testuser/my-repo",
+            scopes: "contents:read",
+            agent_id: "test-agent",
+            requested_scopes_enc: encValue,
+        });
+        expect(resp.status).toBe(200);
+        const tokenService = new TokenService(env.KV);
+        expect(
+            await tokenService.checkConsent("test-agent", "TestUser/My-Repo", [
+                "contents:read",
+            ])
+        ).toBe(true);
+    });
 
     it("accepts consent when user is a GitHub repo admin", async () => {
         // First call: GET /user returns testuser

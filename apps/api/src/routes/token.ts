@@ -57,8 +57,6 @@ const needsConsentResponseSchema = z.object({
     requested_scopes: z.array(z.string()).optional(),
     /** Scopes the user has already approved for this repo (if any). */
     approved_scopes: z.array(z.string()).optional(),
-    /** Whether the repository exists (for UI to decide show create flow). */
-    repo_exists: z.boolean().optional(),
 });
 
 const errorResponseSchema = z.object({
@@ -168,16 +166,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 await tokenService.findConsentScopes(agentId, repo, scopes);
 
             if (!effectiveScopes) {
-                // No matching consent found — check repo existence and whether user
-                // has approved ANY scopes for this repo
-                let repoExists = true;
-                try {
-                    repoExists = await gh.repoExists(owner, name);
-                } catch {
-                    // Repo existence check failed — proceed optimistically assuming exists
-                    // so the consent screen shows the normal two-button flow
-                }
-
+                // No matching consent found — check whether user has approved ANY scopes for this repo
                 const approvedScopes = await tokenService.getAllApprovedScopes(
                     agentId,
                     repo
@@ -196,7 +185,6 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                             repo,
                             agent_id: agentId,
                             repo_mode,
-                            repo_exists: repoExists,
                         }),
                         "consent-request"
                     );
@@ -210,7 +198,6 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
                 }
                 consentUrl += `&repo_mode=${encodeURIComponent(repo_mode)}`;
-                consentUrl += `&repo_exists=${repoExists}`;
 
                 return c.json(
                     {
@@ -218,7 +205,6 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                         url: consentUrl,
                         requested_scopes: scopes,
                         requested_scopes_enc,
-                        repo_exists: repoExists,
                         approved_scopes:
                             approvedScopes.length > 0
                                 ? approvedScopes
@@ -250,7 +236,9 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 repo,
                 effectiveScopes
             );
-            const allowCreate = consentMode === "create-if-missing";
+            const allowCreate =
+                repo_mode === "create-if-missing" &&
+                consentMode === "create-if-missing";
             try {
                 await gh.ensureRepoExists(owner, name, allowCreate);
             } catch (err: unknown) {

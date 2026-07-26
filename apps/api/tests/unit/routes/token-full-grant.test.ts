@@ -97,7 +97,13 @@ describe("POST /api/token — Full grant flow", () => {
 
         const client = testClient(app, makeEnv(pkcs8Pem));
         const resp = await client.api.token.$post(
-            { json: { repo: "owner/repo", scopes: ["contents:read"] } },
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:read"],
+                    repo_mode: "existing-only",
+                },
+            },
             { headers: { Authorization: "Bearer flow-agent-token" } }
         );
         expect(resp.status).toBe(200);
@@ -105,24 +111,7 @@ describe("POST /api/token — Full grant flow", () => {
         expect(body.status).toBe("ok");
         expect(typeof body.token).toBe("string");
     });
-
-    it("returns 202 needs_consent without creating repo when no consent", async () => {
-        // mockFetch will be called by repoExists check before needs_consent response
-        mockFetch
-            .mockResolvedValueOnce(
-                jsonResponse({ id: 42, account: { login: "other" } })
-            )
-            .mockResolvedValueOnce(
-                jsonResponse({
-                    token: "check_token",
-                    expires_at: "2026-12-31T23:59:59Z",
-                    permissions: { administration: "write" },
-                    repository_selection: "selected",
-                })
-            )
-            .mockResolvedValueOnce(
-                jsonResponse({ name: "repo", full_name: "other/repo" })
-            );
+    it("returns 202 needs_consent without making GitHub requests", async () => {
         const client = testClient(app, makeEnv(pkcs8Pem));
         const resp = await client.api.token.$post(
             { json: { repo: "other/repo", scopes: ["contents:read"] } },
@@ -131,23 +120,8 @@ describe("POST /api/token — Full grant flow", () => {
         expect(resp.status).toBe(202);
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("needs_consent");
-        // fetch is now called for repo existence check (but not for creation)
-        expect(mockFetch).toHaveBeenCalledTimes(3);
-        // Verify only the repo existence check happened (GET /repos), no creation POST
-        const repoExistenceCall = mockFetch.mock.calls.find(
-            ([url]) =>
-                typeof url === "string" && url.includes("/repos/other/repo")
-        );
-        expect(repoExistenceCall).toBeDefined();
-        // Ensure no POST to orgs/*/repos or user/repos (repo creation)
-        const repoCreateCall = mockFetch.mock.calls.find(([url, init]) => {
-            if (typeof url !== "string") return false;
-            if (!url.includes("/orgs/") && !url.includes("/user/repos")) {
-                return false;
-            }
-            return init?.method === "POST";
-        });
-        expect(repoCreateCall).toBeUndefined();
+        expect(body).not.toHaveProperty("repo_exists");
+        expect(mockFetch).not.toHaveBeenCalled();
     });
 
     it("returns 200 with token for repo with admin scope", async () => {
@@ -242,6 +216,7 @@ describe("POST /api/token — Full grant flow", () => {
                 json: {
                     repo: "neworg/new-repo",
                     scopes: ["contents:write", "administration:write"],
+                    repo_mode: "create-if-missing",
                 },
             },
             { headers: { Authorization: "Bearer flow-agent-token" } }
@@ -250,6 +225,56 @@ describe("POST /api/token — Full grant flow", () => {
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("ok");
         expect(body.token).toBe("ghs_created_repo_token");
+    });
+
+    it("does not create when the current request is existing-only", async () => {
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent(
+            "test-agent",
+            "existing-only/repo",
+            ["contents:write"],
+            undefined,
+            undefined,
+            "create-if-missing"
+        );
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 88, account: { login: "existing-only" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_existing_only",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(jsonResponse({ message: "Not found" }, 404));
+
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "existing-only/repo",
+                    scopes: ["contents:write"],
+                    repo_mode: "existing-only",
+                },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+        expect(resp.status).toBe(500);
+        const body = await resp.json();
+        expect(body).toEqual({
+            error: "Repository not found and creation was not approved.",
+        });
+        const createCall = mockFetch.mock.calls.find(([url, init]) => {
+            if (typeof url !== "string") return false;
+            if (!url.includes("/orgs/") && !url.includes("/user/repos")) {
+                return false;
+            }
+            return init?.method === "POST";
+        });
+        expect(createCall).toBeUndefined();
     });
 
     it("returns 429 when rate limit is exceeded", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -37,14 +37,21 @@ describe("POST /api/token (authenticated, needs consent)", () => {
         );
     });
 
-    it("returns needs_consent because consent is checked before any GitHub API call", async () => {
+    it("returns needs_consent without exposing repository existence", async () => {
+        const fetchSpy = vi.fn<typeof fetch>();
+        vi.stubGlobal("fetch", fetchSpy);
         const resp = await client.api.token.$post(
             { json: { repo: "owner/repo", scopes: ["contents:read"] } },
             { headers: { Authorization: "Bearer test-agent-token" } }
         );
         expect(resp.status).toBe(202);
-        const body = (await resp.json()) as Record<string, unknown>;
+        const body = z.record(z.string(), z.unknown()).parse(await resp.json());
         expect(body.status).toBe("needs_consent");
+        expect(body).not.toHaveProperty("repo_exists");
+        expect(
+            new URL(z.string().parse(body.url)).searchParams.has("repo_exists")
+        ).toBe(false);
+        expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it("returns consent URL with requested_scopes_enc and agent_id when ENCRYPTION_SECRET is configured", async () => {
