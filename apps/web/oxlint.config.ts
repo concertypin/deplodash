@@ -1,17 +1,11 @@
 import { defineConfig } from "oxlint";
-
-import esConfig from "../../scripts/linter/oxlint-eslint.ts";
+import eslintConfig from "../../scripts/linter/oxlint-eslint.ts";
+import svelteConfig from "../../scripts/linter/oxlint-svelte.ts";
 
 export default defineConfig({
     plugins: ["typescript", "unicorn", "import", "vitest", "promise"],
     env: {
         builtin: true,
-    },
-    options: {
-        denyWarnings: true,
-        typeAware: true,
-        typeCheck: true,
-        reportUnusedDisableDirectives: "error",
     },
     ignorePatterns: [
         "**/node_modules/**",
@@ -21,8 +15,6 @@ export default defineConfig({
         "**/.cache/**",
         "**/.vscode/**",
         "**/.git/**",
-        "**/.wrangler/**",
-        "**/legacy/**",
     ],
     overrides: [
         {
@@ -31,13 +23,13 @@ export default defineConfig({
                 "no-unused-vars": "off",
             },
         },
-        {
-            files: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
-            rules: {
-                // Server is OK to use console for logging, so we can turn this off
-                "no-console": "off",
-            },
-        },
     ],
-    extends: [esConfig],
+    extends: [eslintConfig, svelteConfig],
+    options: {
+        denyWarnings: true,
+        maxWarnings: 0,
+        reportUnusedDisableDirectives: "error",
+        typeCheck: true,
+        typeAware: true,
+    },
 });

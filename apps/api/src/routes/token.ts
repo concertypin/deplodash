@@ -20,7 +20,7 @@ import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { encryptWith, getOrInitKey } from "@/crypto";
-import { expandCompoundScopes, permissionsFromScopes } from "@/github/scopes";
+import { expandCompoundScopes } from "@/github/scopes";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -33,11 +33,20 @@ const requestTokenSchema = z
                 "Invalid repository format"
             ),
         scopes: z.array(z.string().min(1)).min(1).default(["contents:read"]),
+        repo_mode: z
+            .enum(["existing-only", "create-if-missing"])
+            .default("existing-only"),
     })
-    .transform(({ repo, scopes }) => {
+    .transform(({ repo, scopes, repo_mode }) => {
         const [owner, name] = repo.split("/");
         const normalized = expandCompoundScopes(scopes);
-        return { repo, owner: owner!, name: name!, scopes: normalized };
+        return {
+            repo,
+            owner: owner!,
+            name: name!,
+            scopes: normalized,
+            repo_mode,
+        };
     });
 
 const tokenResponseSchema = z.object({
@@ -61,9 +70,6 @@ const needsConsentResponseSchema = z.object({
 const errorResponseSchema = z.object({
     error: z.string(),
 });
-
-// ─── Safe error patterns (messages that are safe to return to callers) ────────
-
 const KNOWN_SAFE_ERRORS: RegExp[] = [
     /^GitHub App is not installed/i,
     /^Failed to check (org|user) installation/i,
@@ -71,6 +77,7 @@ const KNOWN_SAFE_ERRORS: RegExp[] = [
     /^Failed to create repo/i,
     /^GitHub App token request failed/i,
     /^Could not resolve installation/i,
+    /^Repository not found and creation was not approved/i,
 ];
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -121,7 +128,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
     }),
     validator("json", requestTokenSchema),
     async (c) => {
-        const { repo, owner, name, scopes } = c.req.valid("json");
+        const { repo, owner, name, scopes, repo_mode } = c.req.valid("json");
 
         // Check if GitHub App is configured
         const appId = c.env.GITHUB_APP_ID;
@@ -167,7 +174,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 await tokenService.findConsentScopes(agentId, repo, scopes);
 
             if (!effectiveScopes) {
-                // No matching consent found — check if the user has approved ANY scopes for this repo
+                // No matching consent found — check whether user has approved ANY scopes for this repo
                 const approvedScopes = await tokenService.getAllApprovedScopes(
                     agentId,
                     repo
@@ -185,6 +192,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                             scopes: scopes.join(","),
                             repo,
                             agent_id: agentId,
+                            repo_mode,
                         }),
                         "consent-request"
                     );
@@ -197,6 +205,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 if (requested_scopes_enc) {
                     consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
                 }
+                consentUrl += `&repo_mode=${encodeURIComponent(repo_mode)}`;
 
                 return c.json(
                     {
@@ -229,10 +238,30 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 });
             }
 
-            // Determine repo creation permissions
-            const perms = permissionsFromScopes(effectiveScopes);
-            const allowCreate = perms.administration === "write";
-            await gh.ensureRepoExists(owner, name, allowCreate);
+            // Determine whether to allow repo creation from stored consent repo_mode
+            const consentMode = await tokenService.getConsentRepositoryMode(
+                agentId,
+                repo,
+                effectiveScopes
+            );
+            const allowCreate =
+                repo_mode === "create-if-missing" &&
+                consentMode === "create-if-missing";
+            try {
+                await gh.ensureRepoExists(owner, name, allowCreate);
+            } catch (err: unknown) {
+                if (
+                    err instanceof Error &&
+                    !allowCreate &&
+                    err.message.includes("Repository not found")
+                ) {
+                    throw new Error(
+                        "Repository not found and creation was not approved.",
+                        { cause: err }
+                    );
+                }
+                throw err;
+            }
             const tokenResult = await gh.requestToken(
                 effectiveScopes,
                 owner,

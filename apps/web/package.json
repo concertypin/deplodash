@@ -14,15 +14,15 @@
         "format": "prettier --write . --cache --list-different",
         "typecheck": "svelte-check --tsconfig ./tsconfig.app.json --fail-on-warnings",
         "lint": "pnpm run typecheck && pnpm run lint:oxlint --fix && pnpm run lint:eslint --fix",
-        "check": "pnpm run format && pnpm run typecheck && pnpm run lint:oxlint && pnpm run lint:eslint",
+        "check": "pnpm run format && pnpm run lint && pnpm test",
         "lint:check": "pnpm run typecheck && pnpm run lint:oxlint && pnpm run lint:eslint",
-        "lint:oxlint": "oxlint . --type-aware --type-check --report-unused-disable-directives-severity=error",
-        "lint:eslint": "eslint . --cache",
+        "lint:oxlint": "oxlint .",
+        "lint:eslint": "eslint . --cache --cache-location node_modules/.cache/eslint",
         "preview": "vite preview",
         "test": "vitest run"
     },
     "engines": {
-        "node": ">=20"
+        "node": ">=24"
     },
     "dependencies": {
         "@deplodash/api": "workspace:*",

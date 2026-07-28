@@ -32,6 +32,8 @@ describe("GET /auth/github", () => {
         expect(location).toContain("https://github.com/login/oauth/authorize");
         expect(location).toContain("client_id=test-client");
         expect(location).toContain("code_challenge_method=S256");
+        const params = new URL(location ?? "").searchParams;
+        expect(params.get("scope")).toBe("repo read:org");
     });
 
     it("includes next parameter when provided", async () => {

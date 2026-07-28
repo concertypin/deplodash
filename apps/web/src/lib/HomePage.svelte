@@ -100,7 +100,8 @@
                 isSubmitting = false;
             }
         } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to create agent token";
+            error =
+                e instanceof Error ? e.message : "Failed to create agent token";
             isSubmitting = false;
         }
     }
@@ -164,7 +165,7 @@
                 </a>
             </div>
         </div>
-    {:else}
+    {:else if result.kind === "dashboard"}
         {@const { user, consents, agentTokens } = result.data}
         <div class="min-h-screen bg-base-200">
             <!-- Navbar -->
@@ -213,7 +214,10 @@
                     <p class="text-base-content/70 text-sm mb-3">
                         Request a token for any repository by calling:
                     </p>
-                    <pre class="bg-neutral text-neutral-content rounded-box p-4 overflow-x-auto text-sm"><code>{route}</code></pre>
+                    <pre
+                        class="bg-neutral text-neutral-content rounded-box p-4 overflow-x-auto text-sm"><code
+                            >{route}</code
+                        ></pre>
                 </div>
                 {#if error}
                     <div
@@ -264,17 +268,26 @@
                                 <tbody>
                                     {#each agentTokens as token (token.token)}
                                         <tr>
-                                            <td class="font-semibold">{token.agent_id}</td>
+                                            <td class="font-semibold"
+                                                >{token.agent_id}</td
+                                            >
                                             <td>{token.label}</td>
                                             <td class="font-mono text-xs">
-                                                <div class="flex items-center gap-2">
+                                                <div
+                                                    class="flex items-center gap-2"
+                                                >
                                                     <span>
-                                                        {token.token.slice(0, 8)}...{token.token.slice(-4)}
+                                                        {token.token.slice(
+                                                            0,
+                                                            8
+                                                        )}...{token.token.slice(
+                                                            -4
+                                                        )}
                                                     </span>
                                                     <button
                                                         onclick={() =>
                                                             copyToClipboard(
-                                                                token.token,
+                                                                token.token
                                                             )}
                                                         class="btn btn-ghost btn-xs px-1"
                                                         title="Copy full token"
@@ -298,14 +311,14 @@
                                             </td>
                                             <td>
                                                 {new Date(
-                                                    token.created_at,
+                                                    token.created_at
                                                 ).toLocaleDateString()}
                                             </td>
                                             <td class="text-right">
                                                 <button
                                                     onclick={() =>
                                                         revokeAgentToken(
-                                                            token.token,
+                                                            token.token
                                                         )}
                                                     class="text-error hover:text-error/80 transition-colors text-sm font-semibold"
                                                 >
@@ -335,7 +348,9 @@
                                 />
                             </label>
                             <label class="form-control w-full">
-                                <span class="label-text mb-1">Label (optional)</span>
+                                <span class="label-text mb-1"
+                                    >Label (optional)</span
+                                >
                                 <input
                                     type="text"
                                     placeholder="My AI Agent"
@@ -353,8 +368,7 @@
                             </button>
                             <button
                                 onclick={createAgentToken}
-                                disabled={isSubmitting ||
-                                    !agentIdInput.trim()}
+                                disabled={isSubmitting || !agentIdInput.trim()}
                                 class="btn btn-primary"
                             >
                                 {isSubmitting ? "Issuing..." : "Issue"}
@@ -395,7 +409,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                    {#each consents as item (item.repo + "|" + (item.agent_id ?? "") + "|" + item.granted_at)}
+                                    {#each consents as item (item.repo + "|" + (item.agent_id ?? "") + "|" + item.granted_at)}
                                         <tr>
                                             <td class="font-medium"
                                                 >{item.repo}</td

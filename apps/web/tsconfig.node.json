@@ -4,12 +4,11 @@
         "lib": ["ESNext", "DOM", "DOM.Iterable"],
         "types": ["vite/client", "@types/node"]
     },
-    "include": [
-        "./*.ts",
-        "./*.js",
-        "./*.mjs",
-        // dotfiles
-        "./.simple-git-hooks.mjs"
+    "include": ["./*.ts", "./*.js", "./*.mjs"],
+    "references": [
+        {
+            "path": "../../tsconfig.node.json"
+        }
     ],
     "extends": "./tsconfig.base.json"
 }

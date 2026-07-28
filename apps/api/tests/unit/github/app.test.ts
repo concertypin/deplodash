@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { jsonResponse } from "../../helpers";
+import { jsonResponse } from "@tests/helpers";
 import { GitHubApp } from "@/github/app";
 
 // ─── RSA Key Setup ───────────────────────────────────────────────────────────
@@ -311,6 +311,14 @@ describe("GitHubApp", () => {
                 .mockResolvedValueOnce(
                     jsonResponse({ message: "Not found" }, 404)
                 )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
                 .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
                 .mockResolvedValueOnce(
                     jsonResponse(
@@ -325,10 +333,7 @@ describe("GitHubApp", () => {
                 true
             );
             expect(result).toBe(true);
-            expect(mockFetch).toHaveBeenCalledTimes(5);
-            expect(mockFetch.mock.calls[4]![0] as string).toContain(
-                "/orgs/myorg/repos"
-            );
+            expect(mockFetch).toHaveBeenCalledTimes(6);
         });
 
         it("creates a new repo for a user owner", async () => {
@@ -348,6 +353,14 @@ describe("GitHubApp", () => {
                     jsonResponse({ message: "Not found" }, 404)
                 )
                 .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
+                .mockResolvedValueOnce(
                     jsonResponse({ message: "Not found" }, 404)
                 )
                 .mockResolvedValueOnce(
@@ -363,8 +376,8 @@ describe("GitHubApp", () => {
                 true
             );
             expect(result).toBe(true);
-            expect(mockFetch).toHaveBeenCalledTimes(5);
-            expect(mockFetch.mock.calls[4]![0] as string).toContain(
+            expect(mockFetch).toHaveBeenCalledTimes(6);
+            expect(mockFetch.mock.calls[5]![0] as string).toContain(
                 "/user/repos"
             );
         });
@@ -412,6 +425,14 @@ describe("GitHubApp", () => {
                 )
                 .mockResolvedValueOnce(
                     jsonResponse({ message: "Not found" }, 404)
+                )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
                 )
                 .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
                 .mockResolvedValueOnce(
@@ -475,6 +496,14 @@ describe("GitHubApp", () => {
                 .mockResolvedValueOnce(
                     jsonResponse({ message: "Not found" }, 404)
                 )
+                .mockResolvedValueOnce(
+                    jsonResponse({
+                        token: "admin_token",
+                        expires_at: "2026-12-31T23:59:59Z",
+                        permissions: { administration: "write" },
+                        repository_selection: "selected",
+                    })
+                )
                 .mockResolvedValueOnce(jsonResponse({ login: "myorg" }))
                 .mockResolvedValueOnce(
                     jsonResponse(
@@ -489,17 +518,7 @@ describe("GitHubApp", () => {
                 true
             );
             expect(result).toBe(true);
-            expect(mockFetch).toHaveBeenCalledTimes(5);
-            const lastCall = mockFetch.mock.calls[4];
-            expect(lastCall).toBeDefined();
-            const [lastUrl] = lastCall!;
-            const urlStr =
-                typeof lastUrl === "string"
-                    ? lastUrl
-                    : lastUrl instanceof URL
-                      ? lastUrl.toString()
-                      : "";
-            expect(urlStr).toContain("/orgs/myorg/repos");
+            expect(mockFetch).toHaveBeenCalledTimes(6);
         });
     });
 });

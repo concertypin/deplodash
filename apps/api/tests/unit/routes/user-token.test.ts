@@ -45,7 +45,16 @@ describe("GET /api/user/token", () => {
     it("returns user OAuth token when session cookie is valid", async () => {
         const app = new Hono<HonoEnv>().route("/api/user", userRouter);
         const key = await getOrInitKey(KEY);
-        const encrypted = await encryptWith(key, "gho_test_user_token");
+        const encrypted = await encryptWith(
+            key,
+            JSON.stringify({
+                accessToken: "gho_test_user_token",
+                refreshToken: "refresh_test_token",
+                accessExpiresAt: Date.now() + 60_000,
+                refreshExpiresAt: Date.now() + 120_000,
+                v: 2,
+            })
+        );
         const resp = await app.request(
             "/api/user/token",
             { headers: { Cookie: `session=${encrypted}` } },

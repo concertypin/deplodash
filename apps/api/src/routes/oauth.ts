@@ -67,6 +67,7 @@ export const oauthRouter = new Hono<HonoEnv>()
                 accessExpiresAt: Date.now() + oauthResult.expiresIn * 1000,
                 refreshExpiresAt:
                     Date.now() + oauthResult.refreshTokenExpiresIn * 1000,
+                v: 2,
             };
             const encryptedSession = await encryptWith(
                 key,

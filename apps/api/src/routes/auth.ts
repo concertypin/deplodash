@@ -69,7 +69,7 @@ export const authRouter = new Hono<HonoEnv>().get(
             state: encryptedState,
             code_challenge: challenge,
             code_challenge_method: "S256",
-            scope: "repo",
+            scope: "repo read:org",
         });
         return c.redirect(`https://github.com/login/oauth/authorize?${params}`);
     }
