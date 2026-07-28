@@ -121,4 +121,34 @@ describe("TokenService — consent", () => {
         );
         expect(new Set(keys).size).toBe(keys.length);
     });
+
+    it("uses the newest granted_at when consent records overlap a scope", async () => {
+        const prefix = "consent:test-agent:owner/repo:";
+        await kv.put(
+            `${prefix}aaa`,
+            JSON.stringify({
+                repo: "owner/repo",
+                scopes: "contents:read",
+                granted_at: "2026-02-01T00:00:00.000Z",
+                repo_mode: "create-if-missing",
+            })
+        );
+        await kv.put(
+            `${prefix}zzz`,
+            JSON.stringify({
+                repo: "owner/repo",
+                scopes: "contents:read",
+                granted_at: "2026-03-01T00:00:00.000Z",
+                repo_mode: "existing-only",
+            })
+        );
+
+        const mode = await service.getConsentRepositoryMode(
+            "test-agent",
+            "owner/repo",
+            ["contents:read"]
+        );
+
+        expect(mode).toBe("existing-only");
+    });
 });

@@ -149,9 +149,12 @@ export class ConsentService {
         const prefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
         const entries = await this.kv.list({ prefix });
 
-        // Collect the latest record per scope, sorted by key (contains timestamp).
-        // KV keys contain a scopesHash so we iterate all records for this repo+agent.
-        const scopeMode = new Map<string, RepositoryMode>();
+        // Keep the newest record per scope. KV key order is lexical by hash,
+        // not chronological, so granted_at is the source of truth.
+        const scopeMode = new Map<
+            string,
+            { mode: RepositoryMode; grantedAt: string }
+        >();
 
         for (const entry of entries.keys) {
             const value = await this.kv.get(entry.name, "json");
@@ -166,16 +169,19 @@ export class ConsentService {
                 .split(",")
                 .map((s) => s.trim())
                 .filter(Boolean)) {
-                // Only keep the latest (first encountered due to KV key ordering or overwrite the first)
-                if (!scopeMode.has(scope)) {
-                    scopeMode.set(scope, storedMode);
+                const current = scopeMode.get(scope);
+                if (!current || record.granted_at > current.grantedAt) {
+                    scopeMode.set(scope, {
+                        mode: storedMode,
+                        grantedAt: record.granted_at,
+                    });
                 }
             }
         }
 
         // Every effective scope must resolve to "create-if-missing"
         for (const scope of effectiveScopes) {
-            const mode = scopeMode.get(scope);
+            const mode = scopeMode.get(scope)?.mode;
             if (mode !== "create-if-missing") return "existing-only";
         }
 
