@@ -10,13 +10,13 @@ export const route = $state({ current: window.location.pathname });
 
 /** Navigate to a path without a full page reload. */
 export function navigate(path: string): void {
-	history.pushState(null, "", path);
-	route.current = path;
+    history.pushState(null, "", path);
+    route.current = window.location.pathname;
 }
 
 // Listen for browser back/forward
 if (typeof window !== "undefined") {
-	window.addEventListener("popstate", () => {
-		route.current = window.location.pathname;
-	});
+    window.addEventListener("popstate", () => {
+        route.current = window.location.pathname;
+    });
 }

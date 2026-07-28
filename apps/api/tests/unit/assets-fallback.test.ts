@@ -23,6 +23,28 @@ describe("static asset fallback", () => {
         );
     });
 
+    it("forwards unmatched static asset requests through the assets binding", async () => {
+        const fetchAsset = vi.fn<typeof fetch>(() =>
+            Promise.resolve(new Response("JavaScript"))
+        );
+        const response = await app.fetch(
+            new Request(
+                "https://deplodash.condev.workers.dev/assets/app-123.js"
+            ),
+            makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("JavaScript");
+        expect(fetchAsset).toHaveBeenCalledOnce();
+        expect(fetchAsset).toHaveBeenCalledWith(
+            expect.objectContaining({
+                method: "GET",
+                url: "https://deplodash.condev.workers.dev/assets/app-123.js",
+            })
+        );
+    });
+
     it("returns 404 for an unmatched API request regardless of casing", async () => {
         const fetchAsset = vi.fn<typeof fetch>(() =>
             Promise.resolve(new Response("SPA shell"))
