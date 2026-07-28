@@ -121,6 +121,42 @@ describe("POST /api/consent", () => {
         ).toBe(true);
     });
 
+    it("creates a missing personal repository with the OAuth user token", async () => {
+        mockFetch
+            .mockResolvedValueOnce(
+                Response.json({
+                    login: "testuser",
+                    id: 1,
+                    avatar_url: "",
+                    name: "Test User",
+                })
+            )
+            .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+            .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+            .mockResolvedValueOnce(
+                Response.json(
+                    { full_name: "testuser/new-repo" },
+                    { status: 201 }
+                )
+            );
+
+        const resp = await consentPost({
+            repo: "testuser/new-repo",
+            scopes: "contents:write",
+            agent_id: "test-agent",
+            repo_mode: "create-if-missing",
+        });
+
+        expect(resp.status).toBe(200);
+        expect(mockFetch).toHaveBeenNthCalledWith(
+            4,
+            "https://api.github.com/user/repos",
+            expect.objectContaining({
+                method: "POST",
+            })
+        );
+    });
+
     it("returns 500 when recording fails", async () => {
         vi.spyOn(TokenService.prototype, "recordConsent").mockRejectedValue(
             new Error("KV write failed")
