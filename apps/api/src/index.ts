@@ -44,14 +44,17 @@ app.get(
 );
 
 app.notFound((c) => {
-    const pathname = c.req.path;
-    if (
-        apiPathPattern.test(pathname) ||
-        (c.req.method !== "GET" && c.req.method !== "HEAD")
-    ) {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
         return c.text("Not Found", 404);
     }
 
+    const pathname = c.req.path;
+    if (apiPathPattern.test(pathname)) {
+        return c.text("Not Found", 404);
+    }
+
+    // Non-API GET/HEAD requests may be static assets or SPA routes.
+    // Let the ASSETS binding serve files and apply SPA fallback handling.
     const assets = c.env.ASSETS;
     if (!assets) return c.text("Static assets binding unavailable", 500);
     return assets.fetch(c.req.raw);
