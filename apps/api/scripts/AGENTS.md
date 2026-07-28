@@ -4,10 +4,14 @@ This directory is not a source code for production, but to save config files and
 
 `agent-token-manager.ts` — CLI tool for managing deplodash agent tokens in KV.
 
+> The `pnpm run token` package alias was removed. Use the direct Node command below or the dashboard; do not restore the alias.
+
+Direct invocation from `apps/api`:
+
 ```bash
-pnpm run token list [--local]
-pnpm run token create <agent-id> [--label <name>] [--local]
-pnpm run token revoke <token> [--local]
+node scripts/agent-token-manager.ts list [--local]
+node scripts/agent-token-manager.ts create <agent-id> [--label <name>] [--local]
+node scripts/agent-token-manager.ts revoke <token> [--local]
 ```
 
 - `list` — Show all registered tokens with metadata

@@ -103,7 +103,7 @@ Configuration is in `wrangler.jsonc`.
 ## Known Issues / TODOs
 
 - **KV listAgentTokens pagination** — `src/middleware/agent-auth.ts` `listAgentTokens()` does not handle `kv.list()` cursor-based pagination (KV returns at most 1000 keys per page). Add pagination loop.
-- **Agent token management** — Users can issue/revoke agent tokens from their dashboard (`HomePage.svelte`). CLI script at `scripts/agent-token-manager.ts` for bypass provisioning.
+- **Agent token management** — Users can issue/revoke agent tokens from their dashboard (`HomePage.svelte`). Emergency CLI provisioning remains available via direct `node scripts/agent-token-manager.ts` invocation; the removed `pnpm run token` alias is intentionally not supported.
 - **`listConsents()` pagination** — `TokenService.listConsents()` in `token-service.ts` batches KV gets (50 at a time) for performance but still does not handle `kv.list()` cursor-based pagination. At most 1000 consent records returned per page.
 - **`github-app.ts` `resolveInstallationId`** — Does not cache installation IDs across requests. Each request to a different owner triggers a fresh GitHub API call. Consider adding KV-based caching with TTL.
 - **`api.ts`** — Empty legacy v1 API placeholder. Consider removing if not needed.
