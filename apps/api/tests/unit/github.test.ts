@@ -150,52 +150,68 @@ describe("GitHubClient", () => {
         });
     });
 
-    describe("createRepo", () => {
-        it("creates a private repository", async () => {
-            const created = {
-                full_name: "owner/new-repo",
-                name: "new-repo",
-                owner: { login: "owner" },
-                private: true,
-                html_url: "",
-                description: null,
-            };
-            mockFetch.mockResolvedValue(jsonResponse(created, 201));
+    describe("repoExists", () => {
+        it("returns true when the repository exists", async () => {
+            mockFetch.mockResolvedValue(jsonResponse({ name: "repo" }));
 
-            const result = await client.createRepo("new-repo", true);
-            expect(result.full_name).toBe("owner/new-repo");
+            await expect(client.repoExists("owner", "repo")).resolves.toBe(
+                true
+            );
+            expect(mockFetch).toHaveBeenCalledWith(
+                "https://api.github.com/repos/owner/repo",
+                expect.any(Object)
+            );
+        });
+
+        it("returns false for a missing repository", async () => {
+            mockFetch.mockResolvedValue(
+                new Response("Not Found", { status: 404 })
+            );
+
+            await expect(client.repoExists("owner", "repo")).resolves.toBe(
+                false
+            );
+        });
+    });
+
+    describe("createRepository", () => {
+        it("creates a private repository for the authenticated user", async () => {
+            mockFetch.mockResolvedValue(
+                jsonResponse({ full_name: "owner/new-repo" }, 201)
+            );
+
+            await client.createRepository("owner", "new-repo", true, "owner");
+
             expect(mockFetch).toHaveBeenCalledWith(
                 "https://api.github.com/user/repos",
                 expect.objectContaining({
                     method: "POST",
-                    body: expect.stringContaining(
-                        '"private":true'
-                    ) as unknown as string,
                 })
             );
         });
 
-        it("creates a public repository", async () => {
-            const created = {
-                full_name: "owner/public-repo",
-                name: "public-repo",
-                owner: { login: "owner" },
-                private: false,
-                html_url: "",
-                description: null,
-            };
-            mockFetch.mockResolvedValue(jsonResponse(created, 201));
+        it("creates a private repository in an organization", async () => {
+            mockFetch.mockResolvedValue(
+                jsonResponse({ full_name: "org/new-repo" }, 201)
+            );
 
-            const result = await client.createRepo("public-repo", false);
-            expect(result.private).toBe(false);
+            await client.createRepository("org", "new-repo", true, "owner");
+
             expect(mockFetch).toHaveBeenCalledWith(
-                "https://api.github.com/user/repos",
+                "https://api.github.com/orgs/org/repos",
                 expect.objectContaining({
-                    body: expect.stringContaining(
-                        '"private":false'
-                    ) as unknown as string,
+                    method: "POST",
                 })
             );
+        });
+        it("reports repository creation permission failures", async () => {
+            mockFetch.mockResolvedValue(
+                new Response("Forbidden", { status: 403 })
+            );
+
+            await expect(
+                client.createRepository("owner", "new-repo", true, "owner")
+            ).rejects.toThrow("GitHub 403 /user/repos");
         });
     });
 

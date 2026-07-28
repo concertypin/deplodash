@@ -248,6 +248,24 @@ export const consentRouter = new Hono<HonoEnv>()
                     403
                 );
             }
+
+            // Create missing repositories with the authenticated OAuth user
+            // token. Installation tokens cannot create personal repositories.
+            if (repo_mode === "create-if-missing") {
+                const [owner, name] = consentRepo.split("/");
+                if (
+                    owner &&
+                    name &&
+                    !(await ghClient.repoExists(owner, name))
+                ) {
+                    await ghClient.createRepository(
+                        owner,
+                        name,
+                        true,
+                        grantedBy
+                    );
+                }
+            }
             // Grant all requested scopes — duplicates are handled by TokenService
             for (const scope of scopeList) {
                 await tokenService.recordConsent(

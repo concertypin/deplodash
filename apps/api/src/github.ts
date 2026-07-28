@@ -115,11 +115,54 @@ export class GitHubClient {
         }
     }
 
-    createRepo(name: string, isPrivate: boolean): Promise<Repo> {
-        return this.req<Repo>("/user/repos", {
+    /**
+     * Check whether a repository exists for the authenticated user.
+     *
+     * @param owner - Repository owner.
+     * @param repo - Repository name.
+     * @returns Whether GitHub returned a repository for the requested name.
+     */
+    async repoExists(owner: string, repo: string): Promise<boolean> {
+        try {
+            await this.req<Repo>(`/repos/${owner}/${repo}`);
+            return true;
+        } catch (err: unknown) {
+            if (
+                err instanceof Error &&
+                err.message.startsWith(`GitHub 404 /repos/${owner}/${repo}`)
+            ) {
+                return false;
+            }
+            throw err;
+        }
+    }
+
+    /**
+     * Create a private repository during the authenticated consent flow.
+     *
+     * OAuth user tokens can create repositories for the logged-in user and
+     * organizations where that user is allowed to create repositories.
+     *
+     * @param owner - Repository owner.
+     * @param repo - Repository name.
+     * @param isPrivate - Whether the new repository is private.
+     * @param currentUser - Login of the authenticated OAuth user.
+     * @returns The created repository.
+     */
+    createRepository(
+        owner: string,
+        repo: string,
+        isPrivate: boolean,
+        currentUser: string
+    ): Promise<Repo> {
+        const path =
+            owner.toLowerCase() === currentUser.toLowerCase()
+                ? "/user/repos"
+                : `/orgs/${owner}/repos`;
+        return this.req<Repo>(path, {
             method: "POST",
             body: JSON.stringify({
-                name,
+                name: repo,
                 private: isPrivate,
                 auto_init: true,
             }),
