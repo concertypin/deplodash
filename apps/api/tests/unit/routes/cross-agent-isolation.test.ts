@@ -7,7 +7,7 @@ import {
     beforeEach,
     afterEach,
 } from "vitest";
-import { jsonResponse } from "../../helpers";
+import { jsonResponse } from "@tests/helpers";
 import { testClient } from "hono/testing";
 import { Hono } from "hono";
 import type { HonoEnv } from "@/types";
@@ -93,6 +93,7 @@ describe("Cross-agent consent isolation", () => {
         expect(resp.status).toBe(202);
         const body = (await resp.json()) as Record<string, unknown>;
         expect(body.status).toBe("needs_consent");
+        expect(body).not.toHaveProperty("repo_exists");
         expect(mockFetch).not.toHaveBeenCalled();
     });
 

@@ -4,7 +4,7 @@ import { encryptWith, getOrInitKey } from "@/crypto";
 import type { HonoEnv } from "@/types";
 import { consentRouter } from "@/routes/consent";
 import { sessionMiddleware } from "@/middleware";
-import { THROWING_KV } from "../../helpers";
+import { THROWING_KV } from "@tests/helpers";
 
 const CONCURRENT_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: "test-secret-1234567890123456",

@@ -2,12 +2,12 @@
  * Agent Token Manager — CLI helper for managing deplodash agent tokens in KV.
  *
  * Usage:
- *   pnpm run token list [--local]
- *   pnpm run token create <agent-id> [--label <name>] [--local]
- *   pnpm run token revoke <token> [--local]
- *
- * Or directly:
  *   node scripts/agent-token-manager.ts list [--local]
+ *   node scripts/agent-token-manager.ts create <agent-id> [--label <name>] [--local]
+ *   node scripts/agent-token-manager.ts revoke <token> [--local]
+ *
+ * The `pnpm run token` package alias was removed; use the direct Node command
+ * above or the dashboard instead.
  *
  * Options:
  *   --local    Operate on local KV (for wrangler dev)

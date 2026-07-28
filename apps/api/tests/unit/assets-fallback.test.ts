@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import app from "@/index";
-import { makeBaseEnv } from "../helpers";
+import { makeBaseEnv } from "@tests/helpers";
 
 describe("static asset fallback", () => {
     it("serves an unmatched SPA navigation through the assets binding", async () => {

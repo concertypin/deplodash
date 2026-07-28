@@ -15,6 +15,7 @@ const sessionSchema = z.object({
     refreshToken: z.string(),
     accessExpiresAt: z.number(),
     refreshExpiresAt: z.number(),
+    v: z.literal(2),
 });
 
 export const MAX_AGE_SECS = 30 * 24 * 3600; // 30 days
@@ -33,8 +34,16 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                 try {
                     session = sessionSchema.parse(JSON.parse(plain));
                 } catch {
-                    // Legacy format: just a plain access_token string
-                    c.set("gh_token", plain);
+                    // Old session formats lack the current OAuth scopes.
+                    setCookie(c, COOKIE_NAME, "", {
+                        path: "/",
+                        httpOnly: true,
+                        sameSite: "Strict",
+                        secure: true,
+                        maxAge: 0,
+                    });
+                    await next();
+                    return;
                 }
 
                 if (session) {
@@ -70,6 +79,7 @@ export function sessionMiddleware(): MiddlewareHandler<HonoEnv> {
                                 accessExpiresAt: now + result.expiresIn * 1000,
                                 refreshExpiresAt:
                                     now + result.refreshTokenExpiresIn * 1000,
+                                v: 2,
                             };
 
                             const encrypted = await encryptWith(

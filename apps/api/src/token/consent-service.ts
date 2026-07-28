@@ -7,7 +7,7 @@
  * Handles check, find, record, list, revoke operations.
  */
 
-import type { ConsentRecord, ConsentEntry } from "@/types";
+import type { ConsentRecord, ConsentEntry, RepositoryMode } from "@/types";
 import { hashScopes } from "@/github/scopes";
 import { ConsentOwnershipError } from "@/errors";
 import * as z from "zod";
@@ -21,6 +21,7 @@ const consentRecordSchema = z.object({
     agent_id: z.string().optional(),
     requested_scopes: z.string().optional(),
     granted_by: z.string().optional(),
+    repo_mode: z.enum(["existing-only", "create-if-missing"]).optional(),
 });
 
 // ─── KV prefix helpers ───────────────────────────────────────────────────────
@@ -41,7 +42,6 @@ export class ConsentService {
     private discardMalformedConsentKey(key: string): void {
         void this.kv.delete(key).catch(() => undefined);
     }
-
     private parseConsentRecord(
         key: string,
         value: unknown
@@ -51,7 +51,8 @@ export class ConsentService {
             this.discardMalformedConsentKey(key);
             return null;
         }
-        return parsed.data as ConsentRecord;
+        // Zod parse validates shape; return the parsed data matching ConsentRecord
+        return parsed.data satisfies ConsentRecord;
     }
 
     // ─── Read ────────────────────────────────────────────────────────────────
@@ -129,6 +130,64 @@ export class ConsentService {
         return [...allScopes];
     }
 
+    // ─── Repository Mode ──────────────────────────────────────────────────────
+
+    /**
+     * Resolve the repository mode from stored consent records for the given
+     * effective scopes. Returns "create-if-missing" only when EVERY effective
+     * scope's latest consent record has that mode. Any legacy record without
+     * repo_mode, mixed modes, malformed data, or an unresolved scope returns
+     * "existing-only".
+     */
+    async getConsentRepositoryMode(
+        agentId: string,
+        repo: string,
+        effectiveScopes: string[]
+    ): Promise<RepositoryMode> {
+        if (effectiveScopes.length === 0) return "existing-only";
+
+        const prefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
+        const entries = await this.kv.list({ prefix });
+
+        // Keep the newest record per scope. KV key order is lexical by hash,
+        // not chronological, so granted_at is the source of truth.
+        const scopeMode = new Map<
+            string,
+            { mode: RepositoryMode; grantedAt: string }
+        >();
+
+        for (const entry of entries.keys) {
+            const value = await this.kv.get(entry.name, "json");
+            if (!value) continue;
+            const record = this.parseConsentRecord(entry.name, value);
+            if (!record) continue;
+
+            const storedMode: RepositoryMode =
+                record.repo_mode ?? "existing-only";
+
+            for (const scope of record.scopes
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)) {
+                const current = scopeMode.get(scope);
+                if (!current || record.granted_at > current.grantedAt) {
+                    scopeMode.set(scope, {
+                        mode: storedMode,
+                        grantedAt: record.granted_at,
+                    });
+                }
+            }
+        }
+
+        // Every effective scope must resolve to "create-if-missing"
+        for (const scope of effectiveScopes) {
+            const mode = scopeMode.get(scope)?.mode;
+            if (mode !== "create-if-missing") return "existing-only";
+        }
+
+        return "create-if-missing";
+    }
+
     // ─── Write ───────────────────────────────────────────────────────────────
 
     /**
@@ -139,7 +198,8 @@ export class ConsentService {
         repo: string,
         scopes: string[],
         requestedScopes?: string[],
-        grantedBy?: string
+        grantedBy?: string,
+        repoMode: RepositoryMode = "existing-only"
     ): Promise<void> {
         const hash = await hashScopes(scopes);
         const key = consentKey(agentId, repo, hash);
@@ -152,6 +212,7 @@ export class ConsentService {
                 ? { requested_scopes: requestedScopes.join(",") }
                 : {}),
             ...(grantedBy ? { granted_by: grantedBy } : {}),
+            repo_mode: repoMode,
         };
         await this.kv.put(key, JSON.stringify(record), {
             expirationTtl: 90 * 24 * 3600,
@@ -196,6 +257,7 @@ export class ConsentService {
                     entry.agent_id = record.agent_id;
                 if (record.requested_scopes)
                     entry.requested_scopes = record.requested_scopes;
+                if (record.repo_mode) entry.repo_mode = record.repo_mode;
                 results.push(entry);
             }
         }

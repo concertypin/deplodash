@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { TEST_SECRET } from "../../helpers";
+import { z } from "zod";
+import { TEST_SECRET } from "@tests/helpers";
 import { Hono, type MiddlewareHandler } from "hono";
 import type { HonoEnv, SessionPayload } from "@/types";
 import { sessionMiddleware } from "@/middleware";
 import { getOrInitKey, encryptWith } from "@/crypto";
 import { env } from "cloudflare:workers";
-import { contains } from "../../helpers";
+import { contains } from "@tests/helpers";
 
 const BASE_ENV: HonoEnv["Bindings"] = {
     ENCRYPTION_SECRET: TEST_SECRET,
@@ -71,6 +72,40 @@ describe("Session-Based Authorization Boundaries", () => {
         contains(body, "hasToken");
         expect(body?.hasToken).toBe(false);
     });
+    it("clears pre-v2 JSON sessions and legacy raw-token sessions", async () => {
+        const key = await getOrInitKey(TEST_SECRET);
+        const oldSession = await encryptWith(
+            key,
+            JSON.stringify({
+                accessToken: "ghp_old",
+                refreshToken: "refresh_old",
+                accessExpiresAt: Date.now() + 60_000,
+                refreshExpiresAt: Date.now() + 120_000,
+            })
+        );
+        const legacyToken = await encryptWith(key, "ghp_legacy");
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .get("/check", (c) => c.json({ hasToken: !!c.get("gh_token") }));
+
+        for (const cookie of [
+            `session=${oldSession}`,
+            `session=${legacyToken}`,
+        ]) {
+            const resp = await app.fetch(
+                new Request("http://localhost/check", {
+                    headers: { Cookie: cookie },
+                }),
+                BASE_ENV
+            );
+            expect(resp.status).toBe(200);
+            const body = z
+                .object({ hasToken: z.boolean() })
+                .parse(await resp.json());
+            expect(body.hasToken).toBe(false);
+            expect(resp.headers.get("set-cookie")).toContain("Max-Age=0");
+        }
+    });
 
     it("sessionMiddleware does not set gh_token with expired session", async () => {
         const key = await getOrInitKey(TEST_SECRET);
@@ -80,6 +115,7 @@ describe("Session-Based Authorization Boundaries", () => {
             refreshToken: "refresh_expired",
             accessExpiresAt: past,
             refreshExpiresAt: past,
+            v: 2,
         };
         const encrypted = await encryptWith(
             key,

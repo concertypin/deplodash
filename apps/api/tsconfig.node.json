@@ -14,5 +14,10 @@
         "scripts/**/*.ts",
         "scripts/**/*.mjs"
     ],
-    "extends": "./tsconfig.base.json"
+    "extends": "./tsconfig.base.json",
+    "references": [
+        {
+            "path": "../../tsconfig.node.json"
+        }
+    ]
 }

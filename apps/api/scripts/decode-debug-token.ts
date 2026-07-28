@@ -1,10 +1,10 @@
 // Decode a K1 debug token from the OAuth error message.
-// Usage: node scripts/decode-debug-token.mjs <token>
+// Usage: node scripts/decode-debug-token.ts <token>
 // Uses global Web Crypto API — no imports needed (Node 19+).
 
 const token = process.argv[2];
 if (!token) {
-    console.error("Usage: node scripts/decode-debug-token.mjs <token>");
+    console.error("Usage: node scripts/decode-debug-token.ts <token>");
     process.exit(1);
 }
 
@@ -45,3 +45,4 @@ try {
 } catch {
     console.error("❌ Decryption failed — wrong secret or corrupted token.");
 }
+export {};

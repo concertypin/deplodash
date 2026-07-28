@@ -19,13 +19,12 @@
         "postbuild": "node scripts/configure-worker-assets.mjs",
         "cf-typegen": "wrangler types --env-interface CloudflareBindings",
         "format": "prettier --write . --cache --cache-location node_modules/.cache/prettier --list-different",
-        "lint": "pnpm run lint:oxlint --fix",
-        "lint:check": "pnpm run lint:oxlint",
-        "lint:oxlint": "oxlint -c oxlint.config.ts . --type-aware --type-check --report-unused-disable-directives-severity=error",
+        "lint": "pnpm run lint:check --fix",
+        "lint:check": "oxlint",
         "postinstall": "pnpm run cf-typegen",
         "test": "vitest run",
-        "deploy": "pnpm run build && wrangler deploy",
-        "token": "node scripts/agent-token-manager.ts"
+        "check": "pnpm run format && pnpm run lint && pnpm run test",
+        "deploy": "pnpm run build && wrangler deploy"
     },
     "engines": {
         "node": ">=24"

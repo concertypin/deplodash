@@ -1,6 +1,6 @@
-{
-    "$schema": "../../node_modules/oxlint/configuration_schema.json",
-    "rules": {
+import { defineConfig } from "oxlint";
+export default defineConfig({
+    rules: {
         "@typescript-eslint/ban-ts-comment": "warn",
         "@typescript-eslint/no-duplicate-type-constituents": "warn",
         "@typescript-eslint/no-empty-object-type": "off",
@@ -47,7 +47,7 @@
         "require-yield": "warn",
         "@typescript-eslint/no-shadow": "warn",
         "no-console": "warn",
-        "eqeqeq": "warn",
+        eqeqeq: "warn",
         "no-multi-assign": "warn",
         "no-else-return": "warn",
         "no-lonely-if": "warn",
@@ -60,6 +60,7 @@
         "no-sequences": "warn",
         "no-useless-concat": "warn",
         "no-useless-rename": "warn",
-        "prefer-template": "warn"
-    }
-}
+        "prefer-template": "warn",
+        "import/no-relative-parent-imports": "warn"
+    },
+});
