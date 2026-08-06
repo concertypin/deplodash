@@ -5,6 +5,12 @@
  *   consent:${agentId}:${repo}:${scopesHash}    → ConsentRecord
  *
  * Handles check, find, record, list, revoke operations.
+ *
+ * Repository identity is normalized to lowercase when building keys so a
+ * grant recorded as "Owner/Repo" is found by a retry for "owner/repo".
+ * Records written before normalization used the original casing; lookups
+ * and revocations fall back to that key format so existing grants remain
+ * valid and revocable without a migration.
  */
 
 import type { ConsentRecord, ConsentEntry, RepositoryMode } from "@/types";
@@ -29,6 +35,42 @@ const consentRecordSchema = z.object({
 
 function consentKey(agentId: string, repo: string, scopesHash: string): string {
     return `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:${scopesHash}`;
+}
+
+/**
+ * The original-casing key format used before repo normalization.
+ * Kept so consent granted to a mixed-case repository before this change
+ * (e.g. "consent:agent:Owner/Repo:<hash>") is still found and revocable.
+ */
+function consentKeyLegacy(
+    agentId: string,
+    repo: string,
+    scopesHash: string
+): string {
+    return `${CONSENT_PREFIX}${agentId}:${repo}:${scopesHash}`;
+}
+
+/**
+ * Exact keys to probe for a consent record, newest format first.
+ * The legacy original-casing key is included only when it differs.
+ */
+function consentLookupKeys(
+    agentId: string,
+    repo: string,
+    scopesHash: string
+): string[] {
+    const normalized = consentKey(agentId, repo, scopesHash);
+    const legacy = consentKeyLegacy(agentId, repo, scopesHash);
+    return normalized === legacy ? [normalized] : [normalized, legacy];
+}
+
+/**
+ * Prefixes to list for repo-scoped queries, newest format first.
+ */
+function consentLookupPrefixes(agentId: string, repo: string): string[] {
+    const normalized = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
+    const legacy = `${CONSENT_PREFIX}${agentId}:${repo}:`;
+    return normalized === legacy ? [normalized] : [normalized, legacy];
 }
 
 // ─── Consent Service ─────────────────────────────────────────────────────────
@@ -67,10 +109,11 @@ export class ConsentService {
         scopes: string[]
     ): Promise<boolean> {
         const hash = await hashScopes(scopes);
-        const key = consentKey(agentId ?? "", repo, hash);
-        const value = await this.kv.get(key, "json");
-        if (!value) return false;
-        return this.parseConsentRecord(key, value) !== null;
+        for (const key of consentLookupKeys(agentId ?? "", repo, hash)) {
+            const value = await this.kv.get(key, "json");
+            if (value) return this.parseConsentRecord(key, value) !== null;
+        }
+        return false;
     }
 
     /**
@@ -85,15 +128,16 @@ export class ConsentService {
         requestedScopes: string[]
     ): Promise<string[] | null> {
         const exactHash = await hashScopes(requestedScopes);
-        const exactKey = consentKey(agentId, repo, exactHash);
-        const exactValue = await this.kv.get(exactKey, "json");
-        if (exactValue) {
-            const record = this.parseConsentRecord(exactKey, exactValue);
-            if (!record) return null;
-            return record.scopes
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
+        for (const exactKey of consentLookupKeys(agentId, repo, exactHash)) {
+            const exactValue = await this.kv.get(exactKey, "json");
+            if (exactValue) {
+                const record = this.parseConsentRecord(exactKey, exactValue);
+                if (!record) return null;
+                return record.scopes
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+            }
         }
 
         const approvedScopes = await this.getAllApprovedScopes(agentId, repo);
@@ -111,20 +155,27 @@ export class ConsentService {
         agentId: string,
         repo: string
     ): Promise<string[]> {
-        const prefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
-        const entries = await this.kv.list({ prefix });
+        const prefixes = consentLookupPrefixes(agentId, repo);
+        const keyLists = await Promise.all(
+            prefixes.map((prefix) => this.kv.list({ prefix }))
+        );
+        const seenKeys = new Set<string>();
 
         const allScopes = new Set<string>();
-        for (const entry of entries.keys) {
-            const value = await this.kv.get(entry.name, "json");
-            if (!value) continue;
-            const record = this.parseConsentRecord(entry.name, value);
-            if (!record) continue;
-            for (const s of record.scopes
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean)) {
-                allScopes.add(s);
+        for (const entries of keyLists) {
+            for (const entry of entries.keys) {
+                if (seenKeys.has(entry.name)) continue;
+                seenKeys.add(entry.name);
+                const value = await this.kv.get(entry.name, "json");
+                if (!value) continue;
+                const record = this.parseConsentRecord(entry.name, value);
+                if (!record) continue;
+                for (const s of record.scopes
+                    .split(",")
+                    .map((x) => x.trim())
+                    .filter(Boolean)) {
+                    allScopes.add(s);
+                }
             }
         }
 
@@ -147,8 +198,11 @@ export class ConsentService {
     ): Promise<RepositoryMode> {
         if (effectiveScopes.length === 0) return "existing-only";
 
-        const prefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
-        const entries = await this.kv.list({ prefix });
+        const prefixes = consentLookupPrefixes(agentId, repo);
+        const keyLists = await Promise.all(
+            prefixes.map((prefix) => this.kv.list({ prefix }))
+        );
+        const seenKeys = new Set<string>();
 
         // Keep the newest record per scope. KV key order is lexical by hash,
         // not chronological, so granted_at is the source of truth.
@@ -157,25 +211,29 @@ export class ConsentService {
             { mode: RepositoryMode; grantedAt: string }
         >();
 
-        for (const entry of entries.keys) {
-            const value = await this.kv.get(entry.name, "json");
-            if (!value) continue;
-            const record = this.parseConsentRecord(entry.name, value);
-            if (!record) continue;
+        for (const entries of keyLists) {
+            for (const entry of entries.keys) {
+                if (seenKeys.has(entry.name)) continue;
+                seenKeys.add(entry.name);
+                const value = await this.kv.get(entry.name, "json");
+                if (!value) continue;
+                const record = this.parseConsentRecord(entry.name, value);
+                if (!record) continue;
 
-            const storedMode: RepositoryMode =
-                record.repo_mode ?? "existing-only";
+                const storedMode: RepositoryMode =
+                    record.repo_mode ?? "existing-only";
 
-            for (const scope of record.scopes
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)) {
-                const current = scopeMode.get(scope);
-                if (!current || record.granted_at > current.grantedAt) {
-                    scopeMode.set(scope, {
-                        mode: storedMode,
-                        grantedAt: record.granted_at,
-                    });
+                for (const scope of record.scopes
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)) {
+                    const current = scopeMode.get(scope);
+                    if (!current || record.granted_at > current.grantedAt) {
+                        scopeMode.set(scope, {
+                            mode: storedMode,
+                            grantedAt: record.granted_at,
+                        });
+                    }
                 }
             }
         }
@@ -285,11 +343,13 @@ export class ConsentService {
         caller?: string
     ): Promise<void> {
         const hash = await hashScopes(scopes);
-        const key = consentKey(agentId, repo, hash);
+        const keys = consentLookupKeys(agentId, repo, hash);
 
         if (caller) {
-            const value = await this.kv.get(key, "json");
-            if (value) {
+            // Check ownership on whichever key format holds the record.
+            for (const key of keys) {
+                const value = await this.kv.get(key, "json");
+                if (!value) continue;
                 const record = this.parseConsentRecord(key, value);
                 if (
                     record &&
@@ -301,8 +361,10 @@ export class ConsentService {
             }
         }
 
-        await this.kv.delete(key);
-        // Clean up legacy-format key too
+        for (const key of keys) {
+            await this.kv.delete(key);
+        }
+        // Clean up legacy-format key too (no agentId)
         await this.kv.delete(`${CONSENT_PREFIX}${repo}:${hash}`);
     }
 
@@ -317,14 +379,24 @@ export class ConsentService {
         const tokenKeysToDelete: string[] = [];
 
         if (agentId) {
-            const agentPrefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
-            const tokenPrefix = `gh_token_v2:${agentId}:${normalizeRepo(repo)}:`;
+            const consentPrefixes = consentLookupPrefixes(agentId, repo);
+            const tokenPrefixes = consentPrefixes.map((prefix) =>
+                prefix.replace(CONSENT_PREFIX, "gh_token_v2:")
+            );
             const [consentEntries, tokenEntries] = await Promise.all([
-                this.kv.list({ prefix: agentPrefix }),
-                this.kv.list({ prefix: tokenPrefix }),
+                Promise.all(
+                    consentPrefixes.map((prefix) => this.kv.list({ prefix }))
+                ),
+                Promise.all(
+                    tokenPrefixes.map((prefix) => this.kv.list({ prefix }))
+                ),
             ]);
-            consentKeysToDelete.push(...consentEntries.keys.map((k) => k.name));
-            tokenKeysToDelete.push(...tokenEntries.keys.map((k) => k.name));
+            for (const entries of consentEntries) {
+                consentKeysToDelete.push(...entries.keys.map((k) => k.name));
+            }
+            for (const entries of tokenEntries) {
+                tokenKeysToDelete.push(...entries.keys.map((k) => k.name));
+            }
         } else {
             const allEntries = await this.kv.list({
                 prefix: CONSENT_PREFIX,

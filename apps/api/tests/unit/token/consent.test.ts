@@ -60,6 +60,86 @@ describe("TokenService — consent", () => {
             expect(result).toBe(false);
         });
 
+        it("finds consent stored under the pre-normalization key casing", async () => {
+            // Simulate a grant recorded before repo normalization: the KV key
+            // uses the original casing "Owner/Repo".
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                })
+            );
+
+            // The agent retrying with the original casing must still find the
+            // pre-normalization grant (fallback to the legacy key format).
+            expect(
+                await service.checkConsent("test-agent", "Owner/Repo", scopes)
+            ).toBe(true);
+            expect(
+                await service.findConsentScopes(
+                    "test-agent",
+                    "Owner/Repo",
+                    scopes
+                )
+            ).toEqual(scopes);
+        });
+
+        it("revokes consent stored under the pre-normalization key casing", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "testuser",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "Owner/Repo",
+                scopes,
+                "testuser"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+            expect(
+                await service.checkConsent("test-agent", "Owner/Repo", scopes)
+            ).toBe(false);
+        });
+
+        it("rejects revoking a legacy-key consent owned by another user", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "someone-else",
+                })
+            );
+
+            await expect(
+                service.revokeConsent(
+                    "test-agent",
+                    "Owner/Repo",
+                    scopes,
+                    "testuser"
+                )
+            ).rejects.toThrow("You can only revoke your own consents.");
+            expect(await kv.get(legacyKey)).not.toBeNull();
+        });
+
         it("deletes malformed consent records when read", async () => {
             const scopes = ["contents:read"];
             const repo = "broken/repo";
