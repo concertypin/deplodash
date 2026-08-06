@@ -10,6 +10,7 @@
 
 import { hashScopes } from "@/github/scopes";
 import type { CachedToken } from "@/types";
+import { normalizeRepo } from "@/helpers";
 import * as z from "zod";
 
 const dropBufferTime = 5 * 60 * 1000;
@@ -24,7 +25,7 @@ function tokenCacheKey(
     repo: string,
     scopesHash: string
 ): string {
-    return `gh_token_v2:${agentId}:${repo}:${scopesHash}`;
+    return `gh_token_v2:${agentId}:${normalizeRepo(repo)}:${scopesHash}`;
 }
 
 /**

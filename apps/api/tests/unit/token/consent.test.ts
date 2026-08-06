@@ -65,6 +65,10 @@ describe("TokenService — consent", () => {
             const repo = "broken/repo";
             const hash = await hashScopes(scopes);
             const key = `consent:test-agent:${repo}:${hash}`;
+            // Insert a schema-violating (but JSON-parseable) record so
+            // requestToken exercises the malformed-record cleanup path
+            // (not just an empty namespace).
+            await kv.put(key, JSON.stringify({ unexpected: "shape" }));
 
             const result = await service.requestToken(
                 {

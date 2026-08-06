@@ -23,3 +23,12 @@ export function isSafeRedirect(url: string): boolean {
         (url.length === 1 || (url[1] !== "/" && url[1] !== "\\"))
     );
 }
+
+/**
+ * Normalize a repository identity for consent KV keys and waiter matching.
+ * GitHub repository names are case-insensitive, so consent recorded as
+ * "Owner/Repo" must be found by a later request for "owner/repo".
+ */
+export function normalizeRepo(repo: string): string {
+    return repo.trim().toLowerCase();
+}

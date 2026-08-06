@@ -115,3 +115,39 @@ export const approvableScopeIds = new Set(
         category.scopes.map((scope) => scope.id)
     )
 );
+
+/**
+ * Compound/builtin presets accepted by the consent endpoint.
+ * Mirrors LEGACY_PRESETS from the API (apps/api/src/github/scopes.ts).
+ * The consent page expands these into selectable granular scopes.
+ */
+const COMPOUND_SCOPE_PRESETS: Record<string, string[]> = {
+    admin: [
+        "metadata:read",
+        "contents:write",
+        "workflows:write",
+        "administration:write",
+    ],
+    "contents:write+workflows:write": [
+        "metadata:read",
+        "contents:write",
+        "workflows:write",
+    ],
+};
+
+/**
+ * Expand compound presets into their constituent granular scopes.
+ * Non-preset scopes pass through unchanged.
+ */
+export function expandCompoundScopes(scopes: string[]): string[] {
+    const expanded = new Set<string>();
+    for (const scope of scopes) {
+        const preset = COMPOUND_SCOPE_PRESETS[scope];
+        if (preset) {
+            for (const granular of preset) expanded.add(granular);
+        } else {
+            expanded.add(scope);
+        }
+    }
+    return [...expanded];
+}

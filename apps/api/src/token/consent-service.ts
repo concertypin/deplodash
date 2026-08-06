@@ -9,6 +9,7 @@
 
 import type { ConsentRecord, ConsentEntry, RepositoryMode } from "@/types";
 import { hashScopes } from "@/github/scopes";
+import { normalizeRepo } from "@/helpers";
 import { ConsentOwnershipError } from "@/errors";
 import * as z from "zod";
 
@@ -27,7 +28,7 @@ const consentRecordSchema = z.object({
 // ─── KV prefix helpers ───────────────────────────────────────────────────────
 
 function consentKey(agentId: string, repo: string, scopesHash: string): string {
-    return `${CONSENT_PREFIX}${agentId}:${repo}:${scopesHash}`;
+    return `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:${scopesHash}`;
 }
 
 // ─── Consent Service ─────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ export class ConsentService {
         agentId: string,
         repo: string
     ): Promise<string[]> {
-        const prefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
+        const prefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
         const entries = await this.kv.list({ prefix });
 
         const allScopes = new Set<string>();
@@ -146,7 +147,7 @@ export class ConsentService {
     ): Promise<RepositoryMode> {
         if (effectiveScopes.length === 0) return "existing-only";
 
-        const prefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
+        const prefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
         const entries = await this.kv.list({ prefix });
 
         // Keep the newest record per scope. KV key order is lexical by hash,
@@ -316,8 +317,8 @@ export class ConsentService {
         const tokenKeysToDelete: string[] = [];
 
         if (agentId) {
-            const agentPrefix = `${CONSENT_PREFIX}${agentId}:${repo}:`;
-            const tokenPrefix = `gh_token_v2:${agentId}:${repo}:`;
+            const agentPrefix = `${CONSENT_PREFIX}${agentId}:${normalizeRepo(repo)}:`;
+            const tokenPrefix = `gh_token_v2:${agentId}:${normalizeRepo(repo)}:`;
             const [consentEntries, tokenEntries] = await Promise.all([
                 this.kv.list({ prefix: agentPrefix }),
                 this.kv.list({ prefix: tokenPrefix }),
@@ -336,7 +337,11 @@ export class ConsentService {
                 if (!suffix) continue;
                 // Suffix format: agentId:repo:scopesHash
                 const parts = suffix.split(":");
-                if (parts.length >= 2 && parts[parts.length - 2] === repo) {
+                const repoPart = parts[parts.length - 2];
+                if (
+                    repoPart &&
+                    normalizeRepo(repoPart) === normalizeRepo(repo)
+                ) {
                     consentKeysToDelete.push(name);
                     const tokenKey = name.replace(
                         CONSENT_PREFIX,

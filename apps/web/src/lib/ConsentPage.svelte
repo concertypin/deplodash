@@ -1,6 +1,6 @@
 <script lang="ts">
     import { client } from "@/lib/api";
-    import { approvableScopeIds, scopeCategories } from "@/lib/scopes";
+    import { approvableScopeIds, scopeCategories, expandCompoundScopes } from "@/lib/scopes";
     import { SvelteSet } from "svelte/reactivity";
 
     type RepositoryMode = "existing-only" | "create-if-missing";
@@ -79,7 +79,7 @@
                 return;
             }
             selectedScopes.clear();
-            consentRequest.scopes
+            expandCompoundScopes(consentRequest.scopes)
                 .filter((scope) => approvableScopeIds.has(scope))
                 .forEach((scope) => selectedScopes.add(scope));
             page = {
@@ -185,7 +185,11 @@
                         Authorization Required
                     </h2>
                     <p class="text-base-content/70 mb-6">
-                        An agent wants to access repository
+                        Agent
+                        <strong class="text-base-content"
+                            >{page.request.agent_id}</strong
+                        >
+                        wants to access repository
                         <strong class="text-base-content"
                             >{page.request.repo}</strong
                         >

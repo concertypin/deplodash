@@ -132,4 +132,79 @@ describe("ConsentPage — direct consent parameters", () => {
             });
         });
     });
+    it("displays the agent identity before granting access", async () => {
+        window.history.replaceState(
+            null,
+            "",
+            directConsentUrl(
+                "server-repo/example-repo",
+                "agent-7",
+                ["contents:read"],
+                "existing-only"
+            )
+        );
+
+        const mockFetch = vi.fn<typeof fetch>();
+        vi.stubGlobal("fetch", mockFetch);
+        mockFetch.mockImplementation((input: string | URL | Request) => {
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof Request
+                      ? input.url
+                      : input.href;
+            if (url === "/api/user/me") {
+                return mockFetchOnce({ login: "testuser", avatarUrl: "" });
+            }
+            return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+        });
+
+        const screen = await render(ConsentPage);
+        await expect.element(screen.getByText("agent-7")).toBeVisible();
+    });
+
+    it("expands compound scope presets into selectable granular scopes", async () => {
+        window.history.replaceState(
+            null,
+            "",
+            directConsentUrl(
+                "server-repo/example-repo",
+                "agent-1",
+                ["contents:write+workflows:write"],
+                "existing-only"
+            )
+        );
+
+        const mockFetch = vi.fn<typeof fetch>();
+        vi.stubGlobal("fetch", mockFetch);
+        mockFetch.mockImplementation((input: string | URL | Request) => {
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof Request
+                      ? input.url
+                      : input.href;
+            if (url === "/api/user/me") {
+                return mockFetchOnce({ login: "testuser", avatarUrl: "" });
+            }
+            return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+        });
+
+        const screen = await render(ConsentPage);
+        await expect
+            .element(screen.getByText("Authorization Required"))
+            .toBeVisible();
+        // The compound preset expands to contents:write and workflows:write,
+        // both of which are checked by default.
+        const contentsWrite = screen.getByRole("checkbox", {
+            name: /contents:write/,
+        });
+        await expect.element(contentsWrite).toBeVisible();
+        await expect.element(contentsWrite).toBeChecked();
+        const workflowsWrite = screen.getByRole("checkbox", {
+            name: /workflows:write/,
+        });
+        await expect.element(workflowsWrite).toBeVisible();
+        await expect.element(workflowsWrite).toBeChecked();
+    });
 });

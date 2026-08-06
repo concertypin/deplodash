@@ -258,6 +258,33 @@ describe("POST /api/consent", () => {
         ).toBe(true);
     });
 
+    it("finds consent recorded with different repo casing on retry", async () => {
+        // Consent is recorded under "TestUser/My-Repo"; the agent retries
+        // with "testuser/my-repo". GitHub repo identity is case-insensitive,
+        // so the retry must still find the stored grant.
+        const grant = await consentPost({
+            repo: "TestUser/My-Repo",
+            agent_id: "test-agent",
+            scopes: "contents:read",
+            repo_mode: "existing-only",
+        });
+        expect(grant.status).toBe(200);
+
+        const tokenService = new TokenService(env.KV);
+        expect(
+            await tokenService.checkConsent("test-agent", "testuser/my-repo", [
+                "contents:read",
+            ])
+        ).toBe(true);
+        expect(
+            await tokenService.findConsentScopes(
+                "test-agent",
+                "testuser/my-repo",
+                ["contents:read"]
+            )
+        ).toEqual(["contents:read"]);
+    });
+
     it("accepts consent when user is a GitHub repo admin", async () => {
         // First call: GET /user returns testuser
         // Second call: GET /repos/org/repo returns admin: true
