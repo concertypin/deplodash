@@ -54,7 +54,7 @@ describe("POST /api/token (authenticated, needs consent)", () => {
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 
-    it("returns consent URL with requested_scopes_enc and agent_id when ENCRYPTION_SECRET is configured", async () => {
+    it("returns a direct consent URL with request parameters", async () => {
         const resp = await client.api.token.$post(
             {
                 json: {
@@ -65,17 +65,26 @@ describe("POST /api/token (authenticated, needs consent)", () => {
             { headers: { Authorization: "Bearer test-agent-token" } }
         );
         expect(resp.status).toBe(202);
-        const needsConsentSchema = z.object({
-            status: z.literal("needs_consent"),
-            url: z.string(),
-            requested_scopes_enc: z.string().optional(),
-            requested_scopes: z.array(z.string()).optional(),
-            approved_scopes: z.array(z.string()).optional(),
-        });
-        const body = needsConsentSchema.parse(await resp.json());
-        expect(body.url).toContain("requested_scopes_enc=");
-        expect(body.url).toContain("agent_id=test-agent");
-        expect(body.requested_scopes_enc).toBeDefined();
+        const body = z
+            .object({
+                status: z.literal("needs_consent"),
+                url: z.string(),
+                requested_scopes: z.array(z.string()).optional(),
+                approved_scopes: z.array(z.string()).optional(),
+            })
+            .parse(await resp.json());
+        const url = new URL(body.url);
+        expect(url.searchParams.get("repo")).toBe("owner/repo");
+        expect(url.searchParams.get("agent_id")).toBe("test-agent");
+        expect(url.searchParams.get("scopes")).toBe(
+            "contents:read,issues:write"
+        );
+        expect([...url.searchParams.keys()]).toEqual([
+            "repo",
+            "agent_id",
+            "scopes",
+            "repo_mode",
+        ]);
     });
 
     it("expands compound admin scope into granular scopes in consent URL", async () => {
@@ -90,14 +99,12 @@ describe("POST /api/token (authenticated, needs consent)", () => {
             .object({
                 status: z.literal("needs_consent"),
                 url: z.string(),
-                requested_scopes: z.array(z.string()).optional(),
             })
             .parse(await resp.json());
-        // URL should contain expanded granular scopes, not "admin"
-        expect(body.url).not.toContain("scopes=admin");
-        expect(body.url).toContain("administration%3Awrite");
-        expect(body.url).toContain("contents%3Awrite");
-        expect(body.url).toContain("workflows%3Awrite");
+        const url = new URL(body.url);
+        expect(url.searchParams.get("scopes")).toBe(
+            "metadata:read,contents:write,workflows:write,administration:write"
+        );
     });
 
     it("expands contents:write+workflows:write compound scope in consent URL", async () => {
@@ -117,11 +124,8 @@ describe("POST /api/token (authenticated, needs consent)", () => {
                 url: z.string(),
             })
             .parse(await resp.json());
-        // URL should contain expanded scopes, not the compound preset
-        expect(body.url).not.toContain(
-            "scopes=contents%3Awrite%2Bworkflows%3Awrite"
+        expect(new URL(body.url).searchParams.get("scopes")).toBe(
+            "metadata:read,contents:write,workflows:write"
         );
-        expect(body.url).toContain("contents%3Awrite");
-        expect(body.url).toContain("workflows%3Awrite");
     });
 });

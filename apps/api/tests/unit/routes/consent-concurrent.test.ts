@@ -1,139 +1,67 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { encryptWith, getOrInitKey } from "@/crypto";
-import type { HonoEnv } from "@/types";
+import { env } from "cloudflare:workers";
 import { consentRouter } from "@/routes/consent";
 import { sessionMiddleware } from "@/middleware";
-import { THROWING_KV } from "@tests/helpers";
+import type { HonoEnv } from "@/types";
+import { makeBaseEnv } from "@tests/helpers";
 
-const CONCURRENT_ENV: HonoEnv["Bindings"] = {
-    ENCRYPTION_SECRET: "test-secret-1234567890123456",
-    GITHUB_CLIENT_ID: "test-client",
-    GITHUB_CLIENT_SECRET: "test-secret",
-    CALLBACK_URL: "http://localhost:5178/callback",
-    KV: THROWING_KV,
-    GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY:
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
-    GITHUB_TOKEN: "ghp_concurrent_test",
+const BASE_ENV: HonoEnv["Bindings"] = {
+    ...makeBaseEnv(),
+    KV: env.KV,
+    GITHUB_TOKEN: "ghp_test_user_token",
 };
 
-describe("Consent scope validation (concurrent-safe)", () => {
-    it.concurrent(
-        "rejects encrypted scope replayed to a different repo",
-        async () => {
-            const app = new Hono<HonoEnv>()
-                .use("*", sessionMiddleware())
-                .route("/api/consent", consentRouter);
+describe("Direct consent approvals", () => {
+    beforeEach(() => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn<typeof fetch>(() =>
+                Promise.resolve(
+                    Response.json({
+                        login: "testuser",
+                        id: 1,
+                        avatar_url: "",
+                        name: "Test User",
+                    })
+                )
+            )
+        );
+    });
 
-            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
-            const encrypted = await encryptWith(
-                key,
-                JSON.stringify({
-                    version: 1,
-                    purpose: "consent-request",
-                    scopes: "contents:read",
-                    repo: "victim/repo",
-                    agent_id: "test-agent",
-                }),
-                "consent-request"
-            );
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
 
-            const postResp = await app.fetch(
-                new Request("http://localhost/api/consent", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        repo: "different/repo",
-                        scopes: "contents:read",
-                        requested_scopes_enc: encrypted,
-                        agent_id: "test-agent",
-                    }),
-                }),
-                CONCURRENT_ENV
-            );
-            expect(postResp.status).toBe(400);
-            expect(await postResp.json()).toEqual({
-                error: "Invalid consent request. Please try again from the agent's link.",
-            });
-        }
-    );
-
-    it.concurrent(
-        "rejects encrypted scope replayed to a different agent",
-        async () => {
-            const app = new Hono<HonoEnv>()
-                .use("*", sessionMiddleware())
-                .route("/api/consent", consentRouter);
-
-            const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
-            const encrypted = await encryptWith(
-                key,
-                JSON.stringify({
-                    version: 1,
-                    purpose: "consent-request",
-                    scopes: "contents:read",
-                    repo: "shared/repo",
-                    agent_id: "agent-A",
-                }),
-                "consent-request"
-            );
-
-            const postResp = await app.fetch(
-                new Request("http://localhost/api/consent", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        repo: "shared/repo",
-                        scopes: "contents:read",
-                        agent_id: "agent-B",
-                        requested_scopes_enc: encrypted,
-                    }),
-                }),
-                CONCURRENT_ENV
-            );
-            expect(postResp.status).toBe(400);
-            expect(await postResp.json()).toEqual({
-                error: "Invalid consent request. Please try again from the agent's link.",
-            });
-        }
-    );
-
-    it.concurrent("rejects empty scopes (no checkbox checked)", async () => {
+    it("allows the same direct consent URL parameters to be approved repeatedly", async () => {
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
+        const body = {
+            repo: "testuser/repo",
+            agent_id: "test-agent",
+            scopes: "contents:read",
+            repo_mode: "existing-only" as const,
+        };
 
-        const key = await getOrInitKey(CONCURRENT_ENV.ENCRYPTION_SECRET);
-        const encrypted = await encryptWith(
-            key,
-            JSON.stringify({
-                version: 1,
-                purpose: "consent-request",
-                scopes: "contents:read",
-                repo: "shared/repo",
-                agent_id: "test-agent",
-            }),
-            "consent-request"
-        );
-
-        // POST with a valid encrypted payload but no scopes selected (no scopes field)
-        const resp = await app.fetch(
+        const first = await app.fetch(
             new Request("http://localhost/api/consent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    repo: "shared/repo",
-                    requested_scopes_enc: encrypted,
-                    agent_id: "test-agent",
-                    // no scopes field
-                }),
+                body: JSON.stringify(body),
             }),
-            CONCURRENT_ENV
+            BASE_ENV
         );
-        expect(resp.status).toBe(400);
-        expect(await resp.json()).toEqual({
-            error: "You must select at least one permission to proceed.",
-        });
+        const second = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            }),
+            BASE_ENV
+        );
+
+        expect(first.status).toBe(200);
+        expect(second.status).toBe(200);
     });
 });

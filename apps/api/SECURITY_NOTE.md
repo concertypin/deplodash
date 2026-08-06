@@ -24,63 +24,24 @@ Rationale:
 
 ---
 
-## Consent Scope Inflation (src/routes/consent.ts — encrypted field guard)
+## Direct Consent URLs (src/routes/consent.ts, src/token/service.ts)
 
-**Status**: Fixed / Now enforced.
+**Status**: Current design.
 
-Previously the encrypted `requested_scopes_enc` field was purely optional —
-a best-effort integrity hint. The code has been hardened: when
-`ENCRYPTION_SECRET` is configured, the encrypted field is **required**. If
-absent, the request is rejected with 400.
+When an agent lacks consent, the token endpoint returns a URL containing the
+repository, agent ID, requested scopes, and repository mode. The same URL shape
+can be opened proactively from the dashboard, so human approval does not depend
+on an in-flight agent request.
 
-Rationale for the change:
+The consent page requires a GitHub-authenticated session. The consent endpoint
+validates all submitted fields, expands only supported compound scopes, verifies
+the approver's repository or organization authority, and performs approved
+private repository creation only for `create-if-missing`. A GitHub 422 name
+conflict is treated as success only after repository existence is rechecked.
 
-- Prevents MITM-style tampering with hidden form fields
-- Binds the consent to the original {scopes, repo, agent_id} tuple
-- Cross-repo replay and cross-agent redirect are blocked by cryptographic
-  context binding
-
-The `granted_by` field (GitHub login of the user who approved) is now also
-recorded and enforced on revocation (see D-001 below).
-
----
-
-## Consent Request Trust Model and Encrypted Payload Deprecation
-
-**Status**: Accepted design decision; implementation deferred to a follow-up
-consent-flow PR.
-
-The product treats consent as an explicit human authorization action. The
-approver authenticates with GitHub, reviews the repository and scopes shown on
-the consent page, and is expected to verify where the agent's approval URL came
-from. A URL received from a trusted agent interaction may be approved; an
-unexpected URL received through an untrusted channel should not be approved.
-
-Under this trust model, `requested_scopes_enc` is not considered a permanent
-security requirement. AES-GCM provides confidentiality and integrity, while
-HMAC would provide integrity only; neither is required if the human's
-explicit, informed approval is the final authorization boundary. Removing the
-encrypted field is therefore an intentional product/security design change,
-not a claim that the current encrypted implementation is defective.
-
-The current implementation still requires and verifies `requested_scopes_enc`.
-Until the follow-up redesign is merged, its repository, agent, scope, and
-repository-mode binding remains part of the active security contract.
-
-The follow-up redesign must not simply delete the field while leaving the
-consent flow unable to identify what the agent requested. It should establish a
-server-side source of truth for pending requests, such as a short-lived
-consent transaction containing the agent, repository, requested scopes, mode,
-and expiry. The consent UI can then warn when the user is approving a
-permission the agent did not request. This warning is a defense against
-accidental approval and suspected social engineering; it is not a replacement
-for GitHub user authentication.
-
-This decision intentionally defers the encrypted-payload removal and the
-associated `repo_mode` binding change to that follow-up PR. Review findings
-about the current encrypted binding should be tracked as deferred design work,
-not resolved as false positives, until the new trust model is implemented and
-tested.
+Approved scopes are stored as reusable, expiring KV consent records. Repeating
+the same direct consent submission is safe and does not consume one-time state.
+The dashboard filters records by `granted_by` and supports explicit revocation.
 
 ---
 

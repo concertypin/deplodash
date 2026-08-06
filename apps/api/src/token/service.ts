@@ -6,13 +6,12 @@
 
 import { ConsentService } from "@/token/consent-service";
 import { getCachedToken, cacheToken } from "@/token/cache";
-import { encryptWith, getOrInitKey } from "@/crypto";
 import type { RepositoryMode } from "@/types";
 // ─── Result type ─────────────────────────────────────────────────────────────
 
 export type TokenRequestResult =
     | { status: "ok"; token: string; expires_at: string }
-    | { status: "needs_consent"; url: string; requested_scopes_enc?: string };
+    | { status: "needs_consent"; url: string };
 
 // ─── Token Service ───────────────────────────────────────────────────────────
 
@@ -142,19 +141,17 @@ export class TokenService {
             scopes: string[];
             baseUrl: string;
             agentId: string;
-            encryptionSecret?: string;
             repoMode?: RepositoryMode;
         },
         getToken: (
             effectiveScopes: string[]
         ) => Promise<{ token: string; expires_at: string }>
     ): Promise<TokenRequestResult> {
-        const { repo, scopes, baseUrl, encryptionSecret } = params;
+        const { repo, scopes, baseUrl } = params;
         if (scopes.length === 0) {
             throw new Error("Scopes list cannot be empty");
         }
 
-        // 1. Check cache for exact requested scopes
         const cached = await this.getCachedToken(params.agentId, repo, scopes);
         if (cached) {
             return {
@@ -164,7 +161,6 @@ export class TokenService {
             };
         }
 
-        // 2. Find effective scopes from consent (supports granular approval)
         let effectiveScopes: string[];
         const exactConsent = await this.checkConsent(
             params.agentId,
@@ -180,38 +176,9 @@ export class TokenService {
                 scopes
             );
             if (!foundScopes) {
-                let consentUrl =
-                    `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                    `&scopes=${encodeURIComponent(scopes.join(","))}` +
-                    `&agent_id=${encodeURIComponent(params.agentId)}`;
-
-                let requested_scopes_enc: string | undefined;
-                if (encryptionSecret) {
-                    const key = await getOrInitKey(encryptionSecret);
-                    requested_scopes_enc = await encryptWith(
-                        key,
-                        JSON.stringify({
-                            version: 1,
-                            purpose: "consent-request",
-                            scopes: scopes.join(","),
-                            repo,
-                            agent_id: params.agentId,
-                            repo_mode: params.repoMode ?? "existing-only",
-                        }),
-                        "consent-request"
-                    );
-                    consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
-                }
-
-                // Add repository mode to the consent URL for the consent UI.
-                consentUrl += `&repo_mode=${encodeURIComponent(params.repoMode ?? "existing-only")}`;
-
                 return {
                     status: "needs_consent",
-                    url: consentUrl,
-                    ...(requested_scopes_enc !== undefined
-                        ? { requested_scopes_enc }
-                        : {}),
+                    url: `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(params.agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(params.repoMode ?? "existing-only")}`,
                 };
             }
             effectiveScopes = foundScopes;

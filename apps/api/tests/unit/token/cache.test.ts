@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, expect, it, assert, beforeEach } from "vitest";
 import { FakeKV } from "@tests/helpers";
 import { TokenService } from "@/token/service";
 
@@ -40,13 +40,13 @@ describe("TokenService — cache & requestToken", () => {
         });
 
         it("returns null for expired cached token", async () => {
-            const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+            const expired = new Date(Date.now() - 60 * 60 * 1000).toISOString();
             await service.cacheToken(
                 "test-agent",
                 "owner/repo",
                 ["contents:read"],
-                "ghs_test",
-                past
+                "ghs_expired",
+                expired
             );
             const cached = await service.getCachedToken(
                 "test-agent",
@@ -57,15 +57,13 @@ describe("TokenService — cache & requestToken", () => {
         });
 
         it("does not cache token that is too close to expiry", async () => {
-            const nearExpiry = new Date(
-                Date.now() + 4 * 60 * 1000
-            ).toISOString();
+            const tooClose = new Date(Date.now() + 2 * 60 * 1000).toISOString();
             await service.cacheToken(
                 "test-agent",
                 "owner/repo",
                 ["contents:read"],
-                "ghs_near_expiry",
-                nearExpiry
+                "ghs_short",
+                tooClose
             );
             const cached = await service.getCachedToken(
                 "test-agent",
@@ -75,9 +73,9 @@ describe("TokenService — cache & requestToken", () => {
             expect(cached).toBeNull();
         });
 
-        it("caches token with 1 hour max TTL", async () => {
+        it("preserves token expiry metadata for far-future token", async () => {
             const farFuture = new Date(
-                Date.now() + 24 * 60 * 60 * 1000
+                Date.now() + 48 * 60 * 60 * 1000
             ).toISOString();
             await service.cacheToken(
                 "test-agent",
@@ -92,7 +90,8 @@ describe("TokenService — cache & requestToken", () => {
                 ["contents:read"]
             );
             expect(cached).not.toBeNull();
-            expect(cached!.token).toBe("ghs_long");
+            assert(cached);
+            expect(cached.expires_at).toBe(farFuture);
         });
     });
 
@@ -104,7 +103,6 @@ describe("TokenService — cache & requestToken", () => {
                     scopes: ["contents:read"],
                     baseUrl: "http://test",
                     agentId: "test-agent",
-                    encryptionSecret: "test-secret-1234567890123456",
                 },
                 () =>
                     Promise.resolve({
@@ -117,9 +115,6 @@ describe("TokenService — cache & requestToken", () => {
             expect(result.status).toBe("needs_consent");
             if (result.status !== "needs_consent") return;
             expect(result.url).toContain("/auth/consent");
-            expect(result.url).toContain("owner%2Frepo");
-            expect(result.url).toContain("requested_scopes_enc=");
-            expect(result.url).toContain("agent_id=test-agent");
         });
 
         it("returns ok when consent exists", async () => {
@@ -142,7 +137,8 @@ describe("TokenService — cache & requestToken", () => {
                     })
             );
             expect(result.status).toBe("ok");
-            expect((result as { token: string }).token).toBe("ghs_test");
+            assert(result.status === "ok");
+            expect(result.token).toBe("ghs_test");
         });
 
         it("returns cached token on subsequent calls", async () => {

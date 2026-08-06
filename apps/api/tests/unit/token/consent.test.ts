@@ -6,7 +6,6 @@ import { hashScopes } from "@/github/scopes";
 describe("TokenService — consent", () => {
     let kv: FakeKV;
     let service: TokenService;
-
     beforeEach(() => {
         kv = new FakeKV();
         service = new TokenService(kv as unknown as KVNamespace);
@@ -66,13 +65,14 @@ describe("TokenService — consent", () => {
             const repo = "broken/repo";
             const hash = await hashScopes(scopes);
             const key = `consent:test-agent:${repo}:${hash}`;
-            await kv.put(
-                key,
-                JSON.stringify({ granted_at: "2026-06-16T12:14:54.136Z" })
-            );
 
             const result = await service.requestToken(
-                { repo, scopes, baseUrl: "http://test", agentId: "test-agent" },
+                {
+                    repo,
+                    scopes,
+                    baseUrl: "http://test",
+                    agentId: "test-agent",
+                },
                 () =>
                     Promise.resolve({
                         token: "ghs_test",

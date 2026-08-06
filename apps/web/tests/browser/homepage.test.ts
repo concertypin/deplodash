@@ -184,6 +184,52 @@ describe("HomePage", () => {
             .toBeVisible();
     });
 
+    it("opens the preauthorization modal for an existing agent token", async () => {
+        mockFetch.mockImplementation((input: string | URL | Request) => {
+            const url =
+                typeof input === "string"
+                    ? input
+                    : input instanceof URL
+                      ? input.href
+                      : input.url;
+            if (url.includes("/api/user/me")) {
+                return mockFetchOnce({
+                    login: "testuser",
+                    avatarUrl: "",
+                    name: "Test User",
+                });
+            }
+            if (url.includes("/api/user/consents")) {
+                return mockFetchOnce({ consents: [] });
+            }
+            if (url.includes("/api/user/agent/list")) {
+                return mockFetchOnce({
+                    status: "ok",
+                    tokens: [
+                        {
+                            token: "abc123def456token",
+                            agent_id: "agent-alpha",
+                            label: "Agent Alpha",
+                            created_at: "2026-07-15T12:00:00Z",
+                        },
+                    ],
+                });
+            }
+            return mockFetchOnce({});
+        });
+
+        const screen = await render(HomePage);
+        await screen.getByRole("button", { name: "Pre-authorize" }).click();
+        await expect
+            .element(screen.getByPlaceholder("owner/repository"))
+            .toBeVisible();
+        await expect
+            .element(
+                screen.getByText("Approve an agent before it requests a token.")
+            )
+            .toBeVisible();
+    });
+
     it("shows agent tokens in the list when present", async () => {
         mockFetch.mockImplementation((input: string | URL | Request) => {
             const url =
@@ -220,7 +266,9 @@ describe("HomePage", () => {
 
         const screen = await render(HomePage);
 
-        await expect.element(screen.getByText("agent-alpha")).toBeVisible();
+        await expect
+            .element(screen.getByRole("cell", { name: "agent-alpha" }))
+            .toBeVisible();
         await expect.element(screen.getByText("Agent Alpha")).toBeVisible();
     });
 });

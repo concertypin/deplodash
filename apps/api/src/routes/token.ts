@@ -19,7 +19,6 @@ import { bodyLimit } from "hono/body-limit";
 import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
-import { encryptWith, getOrInitKey } from "@/crypto";
 import { expandCompoundScopes } from "@/github/scopes";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -59,11 +58,7 @@ const tokenResponseSchema = z.object({
 const needsConsentResponseSchema = z.object({
     status: z.literal("needs_consent"),
     url: z.string(),
-    /** Encrypted original scope context for integrity verification. */
-    requested_scopes_enc: z.string().optional(),
-    /** The scopes the agent requested. */
     requested_scopes: z.array(z.string()).optional(),
-    /** Scopes the user has already approved for this repo (if any). */
     approved_scopes: z.array(z.string()).optional(),
 });
 
@@ -180,39 +175,13 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     repo
                 );
 
-                // Encrypt the original scope request so consent.ts can verify scope integrity
-                let requested_scopes_enc: string | undefined;
-                if (c.env.ENCRYPTION_SECRET) {
-                    const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
-                    requested_scopes_enc = await encryptWith(
-                        key,
-                        JSON.stringify({
-                            version: 1,
-                            purpose: "consent-request",
-                            scopes: scopes.join(","),
-                            repo,
-                            agent_id: agentId,
-                            repo_mode,
-                        }),
-                        "consent-request"
-                    );
-                }
-
-                let consentUrl =
-                    `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                    `&scopes=${encodeURIComponent(scopes.join(","))}` +
-                    `&agent_id=${encodeURIComponent(agentId)}`;
-                if (requested_scopes_enc) {
-                    consentUrl += `&requested_scopes_enc=${encodeURIComponent(requested_scopes_enc)}`;
-                }
-                consentUrl += `&repo_mode=${encodeURIComponent(repo_mode)}`;
+                const consentUrl = `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`;
 
                 return c.json(
                     {
                         status: "needs_consent",
                         url: consentUrl,
                         requested_scopes: scopes,
-                        requested_scopes_enc,
                         approved_scopes:
                             approvedScopes.length > 0
                                 ? approvedScopes
