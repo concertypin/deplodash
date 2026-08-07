@@ -89,6 +89,60 @@ describe("TokenService — consent", () => {
             ).toEqual(scopes);
         });
 
+        it("finds a pre-normalization grant when retried with a different casing", async () => {
+            // Grant stored under "Owner/Repo" before normalization; the agent
+            // retries with "owner/repo". The exact-key fallback cannot match
+            // (keys differ), so the case-insensitive prefix scan must find it.
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                })
+            );
+
+            expect(
+                await service.checkConsent("test-agent", "owner/repo", scopes)
+            ).toBe(true);
+            expect(
+                await service.findConsentScopes(
+                    "test-agent",
+                    "owner/repo",
+                    scopes
+                )
+            ).toEqual(scopes);
+            expect(
+                await service.getAllApprovedScopes("test-agent", "owner/repo")
+            ).toEqual(["contents:read"]);
+        });
+
+        it("revokes a pre-normalization grant when called with a different casing", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "testuser",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "testuser"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+        });
+
         it("revokes consent stored under the pre-normalization key casing", async () => {
             const scopes = ["contents:read"];
             const hash = await hashScopes(scopes);

@@ -73,6 +73,23 @@ function consentLookupPrefixes(agentId: string, repo: string): string[] {
     return normalized === legacy ? [normalized] : [normalized, legacy];
 }
 
+/**
+ * Split a consent key suffix ("<repo>:<scopesHash>") into its parts.
+ * The repository portion never contains ":" (repo format is owner/name),
+ * so the last colon separates the scope hash.
+ */
+function splitConsentSuffix(suffix: string): {
+    repo: string;
+    scopesHash: string;
+} {
+    const lastColon = suffix.lastIndexOf(":");
+    if (lastColon < 0) return { repo: suffix, scopesHash: "" };
+    return {
+        repo: suffix.slice(0, lastColon),
+        scopesHash: suffix.slice(lastColon + 1),
+    };
+}
+
 // ─── Consent Service ─────────────────────────────────────────────────────────
 
 export class ConsentService {
@@ -84,6 +101,35 @@ export class ConsentService {
 
     private discardMalformedConsentKey(key: string): void {
         void this.kv.delete(key).catch(() => undefined);
+    }
+
+    /**
+     * Find consent keys under the agent prefix whose repository portion
+     * matches `repo` case-insensitively. Discovers pre-normalization records
+     * stored as "consent:<agent>:Owner/Repo:<hash>" even when the current
+     * request uses "owner/repo". Optionally filters by scope hash.
+     */
+    private async findConsentKeysCaseInsensitive(
+        agentId: string,
+        repo: string,
+        scopesHash?: string
+    ): Promise<string[]> {
+        const prefix = `${CONSENT_PREFIX}${agentId}:`;
+        const entries = await this.kv.list({ prefix });
+        const target = normalizeRepo(repo);
+        const keys: string[] = [];
+        for (const entry of entries.keys) {
+            const suffix = entry.name.startsWith(prefix)
+                ? entry.name.slice(prefix.length)
+                : "";
+            if (!suffix) continue;
+            const { repo: repoPart, scopesHash: hashPart } =
+                splitConsentSuffix(suffix);
+            if (normalizeRepo(repoPart) !== target) continue;
+            if (scopesHash !== undefined && hashPart !== scopesHash) continue;
+            keys.push(entry.name);
+        }
+        return keys;
     }
     private parseConsentRecord(
         key: string,
@@ -109,7 +155,18 @@ export class ConsentService {
         scopes: string[]
     ): Promise<boolean> {
         const hash = await hashScopes(scopes);
-        for (const key of consentLookupKeys(agentId ?? "", repo, hash)) {
+        const keys = consentLookupKeys(agentId ?? "", repo, hash);
+        for (const key of keys) {
+            const value = await this.kv.get(key, "json");
+            if (value) return this.parseConsentRecord(key, value) !== null;
+        }
+        // Fallback: pre-normalization records may use any repo casing.
+        const legacyKeys = await this.findConsentKeysCaseInsensitive(
+            agentId ?? "",
+            repo,
+            hash
+        );
+        for (const key of legacyKeys) {
             const value = await this.kv.get(key, "json");
             if (value) return this.parseConsentRecord(key, value) !== null;
         }
@@ -129,6 +186,23 @@ export class ConsentService {
     ): Promise<string[] | null> {
         const exactHash = await hashScopes(requestedScopes);
         for (const exactKey of consentLookupKeys(agentId, repo, exactHash)) {
+            const exactValue = await this.kv.get(exactKey, "json");
+            if (exactValue) {
+                const record = this.parseConsentRecord(exactKey, exactValue);
+                if (!record) return null;
+                return record.scopes
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+            }
+        }
+        // Fallback: pre-normalization records may use any repo casing.
+        const legacyKeys = await this.findConsentKeysCaseInsensitive(
+            agentId,
+            repo,
+            exactHash
+        );
+        for (const exactKey of legacyKeys) {
             const exactValue = await this.kv.get(exactKey, "json");
             if (exactValue) {
                 const record = this.parseConsentRecord(exactKey, exactValue);
@@ -159,23 +233,30 @@ export class ConsentService {
         const keyLists = await Promise.all(
             prefixes.map((prefix) => this.kv.list({ prefix }))
         );
+        const allKeyNames = keyLists.flatMap((list) =>
+            list.keys.map((k) => k.name)
+        );
+        // Fallback: pre-normalization records may use any repo casing.
+        const legacyKeys = await this.findConsentKeysCaseInsensitive(
+            agentId,
+            repo
+        );
+        allKeyNames.push(...legacyKeys);
         const seenKeys = new Set<string>();
 
         const allScopes = new Set<string>();
-        for (const entries of keyLists) {
-            for (const entry of entries.keys) {
-                if (seenKeys.has(entry.name)) continue;
-                seenKeys.add(entry.name);
-                const value = await this.kv.get(entry.name, "json");
-                if (!value) continue;
-                const record = this.parseConsentRecord(entry.name, value);
-                if (!record) continue;
-                for (const s of record.scopes
-                    .split(",")
-                    .map((x) => x.trim())
-                    .filter(Boolean)) {
-                    allScopes.add(s);
-                }
+        for (const keyName of allKeyNames) {
+            if (seenKeys.has(keyName)) continue;
+            seenKeys.add(keyName);
+            const value = await this.kv.get(keyName, "json");
+            if (!value) continue;
+            const record = this.parseConsentRecord(keyName, value);
+            if (!record) continue;
+            for (const s of record.scopes
+                .split(",")
+                .map((x) => x.trim())
+                .filter(Boolean)) {
+                allScopes.add(s);
             }
         }
 
@@ -202,6 +283,15 @@ export class ConsentService {
         const keyLists = await Promise.all(
             prefixes.map((prefix) => this.kv.list({ prefix }))
         );
+        const allKeyNames = keyLists.flatMap((list) =>
+            list.keys.map((k) => k.name)
+        );
+        // Fallback: pre-normalization records may use any repo casing.
+        const legacyKeys = await this.findConsentKeysCaseInsensitive(
+            agentId,
+            repo
+        );
+        allKeyNames.push(...legacyKeys);
         const seenKeys = new Set<string>();
 
         // Keep the newest record per scope. KV key order is lexical by hash,
@@ -211,29 +301,27 @@ export class ConsentService {
             { mode: RepositoryMode; grantedAt: string }
         >();
 
-        for (const entries of keyLists) {
-            for (const entry of entries.keys) {
-                if (seenKeys.has(entry.name)) continue;
-                seenKeys.add(entry.name);
-                const value = await this.kv.get(entry.name, "json");
-                if (!value) continue;
-                const record = this.parseConsentRecord(entry.name, value);
-                if (!record) continue;
+        for (const keyName of allKeyNames) {
+            if (seenKeys.has(keyName)) continue;
+            seenKeys.add(keyName);
+            const value = await this.kv.get(keyName, "json");
+            if (!value) continue;
+            const record = this.parseConsentRecord(keyName, value);
+            if (!record) continue;
 
-                const storedMode: RepositoryMode =
-                    record.repo_mode ?? "existing-only";
+            const storedMode: RepositoryMode =
+                record.repo_mode ?? "existing-only";
 
-                for (const scope of record.scopes
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)) {
-                    const current = scopeMode.get(scope);
-                    if (!current || record.granted_at > current.grantedAt) {
-                        scopeMode.set(scope, {
-                            mode: storedMode,
-                            grantedAt: record.granted_at,
-                        });
-                    }
+            for (const scope of record.scopes
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)) {
+                const current = scopeMode.get(scope);
+                if (!current || record.granted_at > current.grantedAt) {
+                    scopeMode.set(scope, {
+                        mode: storedMode,
+                        grantedAt: record.granted_at,
+                    });
                 }
             }
         }
@@ -246,8 +334,6 @@ export class ConsentService {
 
         return "create-if-missing";
     }
-
-    // ─── Write ───────────────────────────────────────────────────────────────
 
     /**
      * Record consent for (agentId, repo, scopes). Valid for 90 days.
@@ -344,10 +430,17 @@ export class ConsentService {
     ): Promise<void> {
         const hash = await hashScopes(scopes);
         const keys = consentLookupKeys(agentId, repo, hash);
+        // Fallback: pre-normalization records may use any repo casing.
+        const legacyKeys = await this.findConsentKeysCaseInsensitive(
+            agentId,
+            repo,
+            hash
+        );
+        const allKeys = [...new Set([...keys, ...legacyKeys])];
 
         if (caller) {
             // Check ownership on whichever key format holds the record.
-            for (const key of keys) {
+            for (const key of allKeys) {
                 const value = await this.kv.get(key, "json");
                 if (!value) continue;
                 const record = this.parseConsentRecord(key, value);
@@ -361,7 +454,7 @@ export class ConsentService {
             }
         }
 
-        for (const key of keys) {
+        for (const key of allKeys) {
             await this.kv.delete(key);
         }
         // Clean up legacy-format key too (no agentId)
@@ -396,6 +489,16 @@ export class ConsentService {
             }
             for (const entries of tokenEntries) {
                 tokenKeysToDelete.push(...entries.keys.map((k) => k.name));
+            }
+            // Fallback: pre-normalization records may use any repo casing.
+            const legacyConsentKeys = await this.findConsentKeysCaseInsensitive(
+                agentId,
+                repo
+            );
+            for (const name of legacyConsentKeys) {
+                consentKeysToDelete.push(name);
+                const tokenKey = name.replace(CONSENT_PREFIX, "gh_token_v2:");
+                tokenKeysToDelete.push(tokenKey);
             }
         } else {
             const allEntries = await this.kv.list({
