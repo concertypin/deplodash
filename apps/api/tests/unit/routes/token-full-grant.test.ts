@@ -125,6 +125,51 @@ describe("POST /api/token — Full grant flow", () => {
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("returns a fresh consent URL when creation consent must be upgraded", async () => {
+        // Stored consent is existing-only; the agent later requests the same
+        // scopes with create-if-missing. The repo does not exist, so the
+        // token endpoint must surface a new consent URL instead of failing.
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 12345, account: { login: "owner" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token_123",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:read"],
+                    repo_mode: "create-if-missing",
+                },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const body = z
+            .object({
+                status: z.literal("needs_consent"),
+                url: z.string(),
+            })
+            .parse(await resp.json());
+        const url = new URL(body.url);
+        expect(url.searchParams.get("repo")).toBe("owner/repo");
+        expect(url.searchParams.get("repo_mode")).toBe("create-if-missing");
+    });
+
     it("returns 200 with token for expanded admin scopes", async () => {
         const tokenService = new TokenService(env.KV);
         // admin expands to these granular scopes at the token endpoint

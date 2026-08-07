@@ -224,6 +224,25 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     !allowCreate &&
                     err.message.includes("Repository not found")
                 ) {
+                    // Mode upgrade: the agent requests create-if-missing but
+                    // the stored consent only permits existing-only. Surface
+                    // a fresh consent URL so the user can approve creation.
+                    if (repo_mode === "create-if-missing") {
+                        const upgradeUrl =
+                            `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
+                            `&agent_id=${encodeURIComponent(agentId)}` +
+                            `&scopes=${encodeURIComponent(scopes.join(","))}` +
+                            `&repo_mode=${encodeURIComponent("create-if-missing")}`;
+                        return c.json(
+                            {
+                                status: "needs_consent",
+                                url: upgradeUrl,
+                                requested_scopes: scopes,
+                                approved_scopes: effectiveScopes,
+                            },
+                            202
+                        );
+                    }
                     throw new Error(
                         "Repository not found and creation was not approved.",
                         { cause: err }

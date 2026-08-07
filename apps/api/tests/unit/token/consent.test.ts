@@ -169,6 +169,52 @@ describe("TokenService — consent", () => {
             ).toBe(false);
         });
 
+        it("revokes only the caller's record when the tuple has two owners", async () => {
+            // Alice's pre-normalization grant and Bob's normalized grant share
+            // the same agent/repo/scope tuple. Each owner must be able to
+            // revoke their own record without the other's blocking it.
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            const normalizedKey = `consent:test-agent:owner/repo:${hash}`;
+            const grantedAt = new Date().toISOString();
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: grantedAt,
+                    granted_by: "alice",
+                })
+            );
+            await kv.put(
+                normalizedKey,
+                JSON.stringify({
+                    repo: "owner/repo",
+                    scopes: "contents:read",
+                    granted_at: grantedAt,
+                    granted_by: "bob",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "alice"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+            expect(await kv.get(normalizedKey)).not.toBeNull();
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "bob"
+            );
+            expect(await kv.get(normalizedKey)).toBeNull();
+        });
+
         it("rejects revoking a legacy-key consent owned by another user", async () => {
             const scopes = ["contents:read"];
             const hash = await hashScopes(scopes);

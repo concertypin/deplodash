@@ -115,20 +115,30 @@ export class ConsentService {
         scopesHash?: string
     ): Promise<string[]> {
         const prefix = `${CONSENT_PREFIX}${agentId}:`;
-        const entries = await this.kv.list({ prefix });
         const target = normalizeRepo(repo);
         const keys: string[] = [];
-        for (const entry of entries.keys) {
-            const suffix = entry.name.startsWith(prefix)
-                ? entry.name.slice(prefix.length)
-                : "";
-            if (!suffix) continue;
-            const { repo: repoPart, scopesHash: hashPart } =
-                splitConsentSuffix(suffix);
-            if (normalizeRepo(repoPart) !== target) continue;
-            if (scopesHash !== undefined && hashPart !== scopesHash) continue;
-            keys.push(entry.name);
-        }
+        // KV returns at most 1000 keys per page — follow the cursor so a
+        // matching pre-normalization key beyond the first page is found.
+        let cursor: string | undefined;
+        do {
+            const page = await this.kv.list({
+                prefix,
+                ...(cursor ? { cursor } : {}),
+            });
+            for (const entry of page.keys) {
+                const suffix = entry.name.startsWith(prefix)
+                    ? entry.name.slice(prefix.length)
+                    : "";
+                if (!suffix) continue;
+                const { repo: repoPart, scopesHash: hashPart } =
+                    splitConsentSuffix(suffix);
+                if (normalizeRepo(repoPart) !== target) continue;
+                if (scopesHash !== undefined && hashPart !== scopesHash)
+                    continue;
+                keys.push(entry.name);
+            }
+            cursor = page.list_complete ? undefined : page.cursor;
+        } while (cursor);
         return keys;
     }
     private parseConsentRecord(
@@ -439,7 +449,11 @@ export class ConsentService {
         const allKeys = [...new Set([...keys, ...legacyKeys])];
 
         if (caller) {
-            // Check ownership on whichever key format holds the record.
+            // Delete only records owned by the caller. A pre-normalization
+            // record and a normalized record for the same agent/repo/scope
+            // tuple may belong to different users; the caller's own record
+            // must not be blocked by the other's.
+            const ownedKeys: string[] = [];
             for (const key of allKeys) {
                 const value = await this.kv.get(key, "json");
                 if (!value) continue;
@@ -449,9 +463,19 @@ export class ConsentService {
                     record.granted_by &&
                     record.granted_by !== caller
                 ) {
-                    throw new ConsentOwnershipError();
+                    continue;
                 }
+                ownedKeys.push(key);
             }
+            if (ownedKeys.length === 0) {
+                throw new ConsentOwnershipError();
+            }
+            for (const key of ownedKeys) {
+                await this.kv.delete(key);
+            }
+            // Clean up legacy-format key too (no agentId)
+            await this.kv.delete(`${CONSENT_PREFIX}${repo}:${hash}`);
+            return;
         }
 
         for (const key of allKeys) {
