@@ -31,7 +31,7 @@ describe("GET /llms.txt", () => {
         expect(text).toContain("install-credential-helper.sh");
         expect(text).toContain("~/.local/share/deplodash");
         expect(text).toContain("credential.useHttpPath");
-        expect(text).toContain("resets inherited GitHub helpers");
+        expect(text).toContain("replaces conflicting GitHub-scoped helpers");
         expect(resp.headers.get("Content-Type")).toContain("text/markdown");
     });
 });

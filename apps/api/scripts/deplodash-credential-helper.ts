@@ -29,6 +29,10 @@ const REPOSITORY_PATTERN =
     /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/;
 const DEFAULT_DEPLODASH_URL = "https://deplodash.condev.workers.dev";
 const REQUEST_TIMEOUT_MS = 15_000;
+const REPOSITORY_MODES: Record<string, true> = {
+    "existing-only": true,
+    "create-if-missing": true,
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -82,8 +86,12 @@ function missingEffectiveScopes(
 }
 
 function failure(message: string): CredentialHelperResult {
+    // Never quit: an empty stdout lets Git fall through to the user's other
+    // credential helpers (GCM, keychain) for repositories that are not
+    // managed by Deplodash, while the diagnostic below tells deplodash users
+    // what to do next.
     return {
-        stdout: "quit=1\n\n",
+        stdout: "",
         stderr: `${message}\n`,
         exitCode: 0,
     };
@@ -134,8 +142,10 @@ async function handleCredentialRequest(
     const repo = parseRepository(credential.path);
     if (!repo) return ignored();
 
+    // Unconfigured helper: stay silent so Git falls through to the user's
+    // other credential providers.
     const agentToken = env.DEPLODASH_AGENT_TOKEN?.trim();
-    if (!agentToken) return failure("DEPLODASH_AGENT_TOKEN is required");
+    if (!agentToken) return ignored();
 
     const configuredScopes = env.DEPLODASH_SCOPES;
     if (
@@ -143,6 +153,13 @@ async function handleCredentialRequest(
         parseScopes(configuredScopes)?.length === 0
     ) {
         return failure("DEPLODASH_SCOPES must contain at least one scope");
+    }
+
+    const configuredRepoMode = env.DEPLODASH_REPO_MODE?.trim();
+    if (configuredRepoMode && !REPOSITORY_MODES[configuredRepoMode]) {
+        return failure(
+            'DEPLODASH_REPO_MODE must be "existing-only" or "create-if-missing"'
+        );
     }
 
     const baseUrl = (
@@ -164,7 +181,11 @@ async function handleCredentialRequest(
                 Authorization: `Bearer ${agentToken}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ repo, scopes }),
+            body: JSON.stringify(
+                configuredRepoMode
+                    ? { repo, scopes, repo_mode: configuredRepoMode }
+                    : { repo, scopes }
+            ),
             signal: controller.signal,
         });
 

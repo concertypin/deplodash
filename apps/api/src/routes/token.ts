@@ -191,6 +191,30 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 );
             }
 
+            if (effectiveScopes.length < scopes.length) {
+                // Partial consent: the approved subset would produce a token
+                // that cannot satisfy the requested push. Surface a fresh
+                // consent URL instead of issuing a narrowed token, so a
+                // retrying helper does not loop on the same 200 response.
+                const approvedScopes = await tokenService.getAllApprovedScopes(
+                    agentId,
+                    repo
+                );
+                const consentUrl = `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`;
+                return c.json(
+                    {
+                        status: "needs_consent",
+                        url: consentUrl,
+                        requested_scopes: scopes,
+                        approved_scopes:
+                            approvedScopes.length > 0
+                                ? approvedScopes
+                                : undefined,
+                    },
+                    202
+                );
+            }
+
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
             const cached = await tokenService.getCachedToken(
@@ -342,13 +366,15 @@ tokenRouter.on(
         }
         const tokenService = new TokenService(c.env.KV);
 
-        // First check if consent is already granted
+        // First check if consent is already granted for ALL requested scopes.
+        // A partial approval still needs consent for the missing scopes
+        // before token issuance.
         const effectiveScopes = await tokenService.findConsentScopes(
             agentId,
             repo,
             scopes
         );
-        if (effectiveScopes) {
+        if (effectiveScopes && effectiveScopes.length === scopes.length) {
             return new Response(null, { status: 204 });
         }
 
@@ -370,7 +396,10 @@ tokenRouter.on(
                                 repo,
                                 scopes
                             );
-                        if (currentScopes) {
+                        if (
+                            currentScopes &&
+                            currentScopes.length === scopes.length
+                        ) {
                             finishWithSuccess();
                         }
                     } catch (e) {
@@ -392,7 +421,10 @@ tokenRouter.on(
                                 repo,
                                 scopes
                             );
-                        if (currentScopes) {
+                        if (
+                            currentScopes &&
+                            currentScopes.length === scopes.length
+                        ) {
                             finishWithSuccess();
                         }
                     } catch (e) {

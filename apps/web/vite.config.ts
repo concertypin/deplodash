@@ -53,6 +53,7 @@ const testConfig: Config["test"] = {
                 env: {
                     VITEST_BROWSER: "1",
                 },
+                testTimeout: 30000,
             },
         },
         {

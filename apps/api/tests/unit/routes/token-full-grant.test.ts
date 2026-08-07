@@ -125,6 +125,43 @@ describe("POST /api/token — Full grant flow", () => {
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("returns a consent URL when consent covers only a subset of requested scopes", async () => {
+        // Partial approval: contents:read is consented but the agent requests
+        // contents:write too. A narrowed 200 token would loop forever for a
+        // retrying credential helper, so the API must surface a fresh
+        // consent URL instead.
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:read", "workflows:write"],
+                    repo_mode: "existing-only",
+                },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+        expect(resp.status).toBe(202);
+        const body = z
+            .object({
+                status: z.literal("needs_consent"),
+                url: z.string(),
+                requested_scopes: z.array(z.string()).optional(),
+                approved_scopes: z.array(z.string()).optional(),
+            })
+            .parse(await resp.json());
+        const url = new URL(body.url);
+        expect(url.searchParams.get("repo")).toBe("owner/repo");
+        expect(url.searchParams.get("scopes")).toBe(
+            "contents:read,workflows:write"
+        );
+        expect(body.approved_scopes).toEqual(["contents:read"]);
+    });
+
     it("returns a fresh consent URL when creation consent must be upgraded", async () => {
         // Stored consent is existing-only; the agent later requests the same
         // scopes with create-if-missing. The repo does not exist, so the

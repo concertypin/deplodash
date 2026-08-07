@@ -142,7 +142,7 @@ void test("rejects a token whose effective scopes are narrower than requested", 
             }),
         () => ({ success: true, stdout: "" })
     );
-    assert.equal(result.stdout, "quit=1\n\n");
+    assert.equal(result.stdout, "");
     assert.equal(result.stderr.includes("contents:write"), true);
     assert.equal(result.stderr.includes("workflows:write"), true);
     assert.equal(result.stderr.includes("ghs_test"), false);
@@ -213,7 +213,9 @@ void test("ignores unsupported actions and contexts without work", async () => {
     assert.equal(runner.calls.length, 0);
 });
 
-void test("returns quit for applicable failures without leaking secrets", async () => {
+void test("reports applicable failures without leaking secrets or quitting", async () => {
+    // Unconfigured helper (no token) stays silent so Git can fall through
+    // to the user's other credential providers.
     const missingToken = await getResult(
         async () => response(200, {}),
         () => ({ success: true, stdout: "" }),
@@ -221,8 +223,11 @@ void test("returns quit for applicable failures without leaking secrets", async 
             DEPLODASH_AGENT_TOKEN: "",
         }
     );
-    assert.equal(missingToken.stdout, "quit=1\n\n");
-    assert.equal(missingToken.stderr.includes("agent-secret"), false);
+    assert.deepEqual(missingToken, {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+    });
 
     const consent = await getResult(
         async () =>
@@ -231,7 +236,7 @@ void test("returns quit for applicable failures without leaking secrets", async 
             }),
         () => ({ success: true, stdout: "" })
     );
-    assert.equal(consent.stdout, "quit=1\n\n");
+    assert.equal(consent.stdout, "");
     const consentUrlMatch = /consent required: (\S+)/.exec(consent.stderr);
     assert(consentUrlMatch);
     const consentUrlValue = consentUrlMatch[1];
@@ -245,7 +250,7 @@ void test("returns quit for applicable failures without leaking secrets", async 
         async () => new Response("not-json", { status: 200 }),
         () => ({ success: true, stdout: "" })
     );
-    assert.equal(malformed.stdout, "quit=1\n\n");
+    assert.equal(malformed.stdout, "");
 
     const badScopes = await getResult(
         async () => response(200, { token: "ghs_test" }),
@@ -254,7 +259,37 @@ void test("returns quit for applicable failures without leaking secrets", async 
             DEPLODASH_SCOPES: " , ",
         }
     );
-    assert.equal(badScopes.stdout, "quit=1\n\n");
+    assert.equal(badScopes.stdout, "");
+    assert.equal(badScopes.stderr.includes("DEPLODASH_SCOPES"), true);
+});
+
+void test("sends repository mode when DEPLODASH_REPO_MODE opts in", async () => {
+    const result = await getResult(
+        async (_url, init) => {
+            assert.deepEqual(await new Request(_url, init).json(), {
+                repo: "owner/repo",
+                scopes: SUCCESS_SCOPES,
+                repo_mode: "create-if-missing",
+            });
+            return response(200, {
+                token: "ghs_test",
+                effective_scopes: SUCCESS_SCOPES,
+            });
+        },
+        () => ({ success: true, stdout: "" }),
+        { DEPLODASH_REPO_MODE: "create-if-missing" }
+    );
+    assert.equal(result.stdout.includes("ghs_test"), true);
+});
+
+void test("rejects an invalid DEPLODASH_REPO_MODE without leaking secrets", async () => {
+    const result = await getResult(
+        async () => response(200, { token: "ghs_test" }),
+        () => ({ success: true, stdout: "" }),
+        { DEPLODASH_REPO_MODE: "delete-everything" }
+    );
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.includes("DEPLODASH_REPO_MODE"), true);
 });
 
 void test("works through git credential fill with an isolated helper configuration", async () => {
