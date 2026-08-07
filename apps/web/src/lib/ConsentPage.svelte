@@ -46,7 +46,46 @@
               }
             : null;
 
-    let selectedScopes = new SvelteSet<string>();
+    // Immutable snapshot of the granular scope IDs the agent initially
+    // requested. Requested scopes render first (checked by default); every
+    // other approvable scope is folded into the additional-permissions
+    // disclosure. `selectedScopes` is a mutable copy users can extend.
+    const requestedScopeIds = new Set(
+        consentRequest
+            ? expandCompoundScopes(consentRequest.scopes).filter((scope) =>
+                  approvableScopeIds.has(scope)
+              )
+            : []
+    );
+
+    // Categories containing at least one requested scope, restricted to the
+    // requested scopes so unrequested choices stay inside the disclosure.
+    const requestedCategories = scopeCategories
+        .map((category) => ({
+            label: category.label,
+            scopes: category.scopes.filter((scope) =>
+                requestedScopeIds.has(scope.id)
+            ),
+        }))
+        .filter((category) => category.scopes.length > 0);
+
+    // Categories with any scope the agent did not request, shown only inside
+    // the additional-permissions disclosure.
+    const additionalCategories = scopeCategories
+        .map((category) => ({
+            label: category.label,
+            scopes: category.scopes.filter(
+                (scope) => !requestedScopeIds.has(scope.id)
+            ),
+        }))
+        .filter((category) => category.scopes.length > 0);
+
+    const additionalScopeCount = additionalCategories.reduce(
+        (total, category) => total + category.scopes.length,
+        0
+    );
+
+    let selectedScopes = new SvelteSet<string>([...requestedScopeIds]);
     let error = $state<string | null>(null);
 
     type PageState =
@@ -78,10 +117,6 @@
                 };
                 return;
             }
-            selectedScopes.clear();
-            expandCompoundScopes(consentRequest.scopes)
-                .filter((scope) => approvableScopeIds.has(scope))
-                .forEach((scope) => selectedScopes.add(scope));
             page = {
                 kind: "ready",
                 user: userData,
@@ -206,7 +241,7 @@
                             >
                                 Select permissions to grant:
                             </p>
-                            {#each scopeCategories as category (category.label)}
+                            {#each requestedCategories as category (category.label)}
                                 <fieldset class="mb-4">
                                     <legend
                                         class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-2"
@@ -242,6 +277,54 @@
                                     </div>
                                 </fieldset>
                             {/each}
+                            {#if additionalScopeCount > 0}
+                                <details class="collapse collapse-arrow">
+                                    <summary class="collapse-title">
+                                        Additional permissions
+                                        ({additionalScopeCount})
+                                    </summary>
+                                    <div class="collapse-content">
+                                        {#each additionalCategories as category (category.label)}
+                                            <fieldset class="mb-4">
+                                                <legend
+                                                    class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-2"
+                                                    >{category.label}</legend
+                                                >
+                                                <div class="space-y-2">
+                                                    {#each category.scopes as scope (scope.id)}
+                                                        <label
+                                                            class="flex items-start gap-3 cursor-pointer"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedScopes.has(
+                                                                    scope.id
+                                                                )}
+                                                                onchange={() =>
+                                                                    toggleScope(
+                                                                        scope.id
+                                                                    )}
+                                                                class="checkbox checkbox-sm mt-1"
+                                                            />
+                                                            <div>
+                                                                <span
+                                                                    class="text-sm font-medium text-base-content"
+                                                                    >{scope.id}</span
+                                                                >
+                                                                <p
+                                                                    class="text-xs text-base-content/60"
+                                                                >
+                                                                    {scope.description}
+                                                                </p>
+                                                            </div>
+                                                        </label>
+                                                    {/each}
+                                                </div>
+                                            </fieldset>
+                                        {/each}
+                                    </div>
+                                </details>
+                            {/if}
                         </div>
                     {/if}
 

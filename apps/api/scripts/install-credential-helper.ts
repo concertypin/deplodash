@@ -1,0 +1,163 @@
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+    closeSync,
+    createReadStream,
+    createWriteStream,
+    existsSync,
+    openSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+
+const baseUrl =
+    process.env.DEPLODASH_INSTALL_URL ??
+    "https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts";
+const installDir =
+    process.env.DEPLODASH_INSTALL_DIR ??
+    join(homedir(), ".local", "share", "deplodash");
+const helperPath = join(installDir, "deplodash-credential-helper.ts");
+const runnerPath = join(installDir, "deplodash-credential-helper-run.mjs");
+
+function runGit(args: string[]): void {
+    const result = spawnSync("git", args, { stdio: "inherit" });
+    if (result.status !== 0)
+        throw new Error(
+            `git config failed with exit code ${result.status ?? "unknown"}`
+        );
+}
+
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function readToken(): Promise<string> {
+    const configured = process.env.DEPLODASH_AGENT_TOKEN?.trim();
+    if (configured) return configured;
+
+    if (!existsSync("/dev/tty")) {
+        throw new Error(
+            "an agent token is required; set DEPLODASH_AGENT_TOKEN when stdin is not a terminal"
+        );
+    }
+
+    const ttyFd = openSync("/dev/tty", "r+");
+    const input = createReadStream("/dev/tty", { fd: ttyFd, autoClose: false });
+    const output = createWriteStream("/dev/tty", {
+        fd: ttyFd,
+        autoClose: false,
+    });
+    const prompt = createInterface({ input, output });
+    const echo = (enabled: boolean): void => {
+        const result = spawnSync("stty", [enabled ? "echo" : "-echo"], {
+            stdio: [ttyFd, ttyFd, ttyFd],
+        });
+        if (result.status !== 0) {
+            throw new Error("unable to configure terminal echo");
+        }
+    };
+    let echoDisabled = false;
+    const restoreEcho = (): void => {
+        if (!echoDisabled) return;
+        try {
+            echo(true);
+        } finally {
+            echoDisabled = false;
+        }
+    };
+    const interrupt = (exitCode: number): void => {
+        try {
+            restoreEcho();
+        } finally {
+            process.exit(exitCode);
+        }
+    };
+    const onSigint = (): void => interrupt(130);
+    const onSigterm = (): void => interrupt(143);
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
+    try {
+        echo(false);
+        echoDisabled = true;
+        const token = await prompt.question("Deplodash agent token: ");
+        return token.trim();
+    } finally {
+        process.removeListener("SIGINT", onSigint);
+        process.removeListener("SIGTERM", onSigterm);
+        try {
+            restoreEcho();
+        } finally {
+            prompt.close();
+            input.destroy();
+            output.destroy();
+            closeSync(ttyFd);
+        }
+    }
+}
+
+async function main(): Promise<void> {
+    const token = await readToken();
+    if (!token) throw new Error("an agent token is required");
+
+    await mkdir(installDir, { recursive: true });
+    process.stdout.write(
+        "Downloading the Deplodash Git credential helper...\n"
+    );
+    const response = await fetch(`${baseUrl}/deplodash-credential-helper.ts`);
+    if (!response.ok)
+        throw new Error(`helper download failed (HTTP ${response.status})`);
+    await writeFile(helperPath, await response.text(), { mode: 0o600 });
+
+    const runner = `#!/usr/bin/env node\nimport { spawnSync } from "node:child_process";\nimport { fileURLToPath } from "node:url";\nimport { dirname, join } from "node:path";\nprocess.env.DEPLODASH_AGENT_TOKEN = ${JSON.stringify(token)};\nconst helper = join(dirname(fileURLToPath(import.meta.url)), "deplodash-credential-helper.ts");\nconst result = spawnSync("node", [helper, ...process.argv.slice(2)], { stdio: "inherit", env: process.env });\nprocess.exitCode = result.status ?? 1;\n`;
+    const temporaryRunnerPath = `${runnerPath}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(temporaryRunnerPath, runner, { mode: 0o700 });
+        await chmod(temporaryRunnerPath, 0o700);
+        await rename(temporaryRunnerPath, runnerPath);
+    } finally {
+        await rm(temporaryRunnerPath, { force: true });
+    }
+
+    runGit([
+        "config",
+        "--global",
+        "credential.https://github.com.useHttpPath",
+        "true",
+    ]);
+    runGit([
+        "config",
+        "--global",
+        "--replace-all",
+        "credential.https://github.com.helper",
+        "",
+    ]);
+    const configuredRunnerPath = runnerPath.replaceAll("\\", "/");
+    runGit([
+        "config",
+        "--global",
+        "--add",
+        "credential.https://github.com.helper",
+        `!node ${shellQuote(configuredRunnerPath)}`,
+    ]);
+    process.stdout.write(
+        "Installed Deplodash credential helper for HTTPS GitHub remotes.\n"
+    );
+    process.stdout.write(
+        "Run git push normally; approve the consent URL if Git reports that approval is required.\n"
+    );
+}
+
+if (
+    process.argv[1] &&
+    import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+    void main().catch((error: unknown) => {
+        process.stderr.write(
+            `${error instanceof Error ? error.message : "installation failed"}\n`
+        );
+        process.exitCode = 1;
+    });
+}

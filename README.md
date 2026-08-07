@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/concertypin/deplodash)
+
 # 🤖 Deplodash — GitHub App Token Service
 
 Issue scoped GitHub Installation Tokens to AI agents for git push and API access.
@@ -89,6 +91,16 @@ sequenceDiagram
 ```
 
 Available scopes: `contents:read`, `contents:write`, `workflows:write`, `admin`
+
+## Git Credential Helper
+
+For HTTPS `git push`, install the Node 24 credential helper with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh
+```
+
+The installer prompts for your agent token, stores it in a private runner under `~/.local/share/deplodash`, enables `credential.useHttpPath`, resets inherited GitHub helpers, and configures the helper. It does not put the token in Git configuration. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set. Run `git push` normally; approve the consent URL if Git reports that approval is required. In PowerShell, run the same command from a shell with `curl.exe` available.
 
 ## OAuth Setup
 

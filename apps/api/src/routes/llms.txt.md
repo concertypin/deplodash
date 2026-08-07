@@ -101,18 +101,16 @@ Uses the session cookie created by the login flow and returns the user OAuth tok
 
 ## Git Credential Helper
 
-### HTTPS with credential helper (persistent)
+### HTTPS credential helper for git push
+
+Install the Node 24 helper and configure Git in one command:
 
 ```sh
-# Set remote to HTTPS (not SSH)
-git remote set-url origin https://github.com/owner/repo.git
-
-# Configure credential helper to fetch tokens from deplodash
-git config credential.helper "!f() {
-  echo username=x-access-token
-  echo password=$(curl -s -X POST {{BASE}}/api/token     -H 'Authorization: Bearer YOUR_AGENT_TOKEN'     -H 'Content-Type: application/json'     -d '{\"repo\":\"owner/repo\",\"scopes\":[\"contents:write\"]}'     | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-}; f"
+curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh
 ```
+
+The installer prompts for the long-lived agent token, stores it in a private runner under `~/.local/share/deplodash` rather than Git configuration, enables `credential.useHttpPath`, resets inherited GitHub helpers, and configures the helper. Use an HTTPS GitHub remote such as `https://github.com/owner/repo.git`. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set. If consent is required, it stops without prompting; open the consent URL printed to stderr, then retry `git push`.
+The installer runs `git config --global credential.https://github.com.useHttpPath true` and resets inherited helpers with `git config --global --replace-all credential.https://github.com.helper ""` before registering the Node runner.
 
 ## Permissions
 

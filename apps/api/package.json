@@ -22,7 +22,8 @@
         "lint": "pnpm run lint:check --fix",
         "lint:check": "oxlint",
         "postinstall": "pnpm run cf-typegen",
-        "test": "vitest run",
+        "test": "vitest run && pnpm run test:credential",
+        "test:credential": "node --test scripts/deplodash-credential-helper.test.ts",
         "check": "pnpm run format && pnpm run lint && pnpm run test",
         "deploy": "pnpm run build && wrangler deploy"
     },
