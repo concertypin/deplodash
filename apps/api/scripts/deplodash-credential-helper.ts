@@ -22,6 +22,7 @@ type TokenResponse = {
     status?: unknown;
     token?: unknown;
     url?: unknown;
+    effective_scopes?: unknown;
 };
 
 const REPOSITORY_PATTERN =
@@ -49,7 +50,12 @@ function parseCredentialInput(input: string): CredentialInput {
 
 function parseRepository(path: string | undefined): string | null {
     if (!path) return null;
-    const repository = path.replace(/^\//, "").replace(/\.git$/, "");
+    // Git LFS asks for credentials at <repo>.git/info/lfs/... — drop the LFS
+    // suffix before matching the repository portion.
+    const repository = path
+        .replace(/\/info\/lfs.*$/, "")
+        .replace(/^\//, "")
+        .replace(/\.git$/, "");
     return REPOSITORY_PATTERN.test(repository) ? repository : null;
 }
 
@@ -60,6 +66,19 @@ function parseScopes(value: string | undefined): string[] | null {
         .map((scope) => scope.trim())
         .filter((scope) => scope.length > 0);
     return scopes.length > 0 ? scopes : [];
+}
+
+function missingEffectiveScopes(
+    requested: string[],
+    payload: TokenResponse
+): string[] {
+    if (!Array.isArray(payload.effective_scopes)) return [];
+    const effective = new Set(
+        payload.effective_scopes.filter(
+            (scope): scope is string => typeof scope === "string"
+        )
+    );
+    return requested.filter((scope) => !effective.has(scope));
 }
 
 function failure(message: string): CredentialHelperResult {
@@ -106,10 +125,10 @@ async function handleCredentialRequest(
     if (action !== "get") return ignored();
 
     const credential = parseCredentialInput(input);
-    if (
-        credential.protocol !== "https" ||
-        credential.host?.toLowerCase() !== "github.com"
-    )
+    // Git may append the explicit default HTTPS port to the host.
+    const host =
+        credential.host?.toLowerCase().replace(/^([^:]+):443$/, "$1") ?? "";
+    if (credential.protocol !== "https" || host !== "github.com")
         return ignored();
 
     const repo = parseRepository(credential.path);
@@ -164,6 +183,16 @@ async function handleCredentialRequest(
             typeof payload.token === "string" &&
             payload.token.length > 0
         ) {
+            // The API may return a token whose effective scopes are a subset
+            // of the requested scopes (partial consent). Handing that token
+            // to Git produces a confusing push-time 403, so fail fast with a
+            // consent directive instead.
+            const missingScopes = missingEffectiveScopes(scopes, payload);
+            if (missingScopes.length > 0) {
+                return failure(
+                    `token scopes are narrower than requested (missing: ${missingScopes.join(", ")}); grant consent for these scopes and retry`
+                );
+            }
             return {
                 stdout: `username=x-access-token\npassword=${payload.token}\n\n`,
                 stderr: "",

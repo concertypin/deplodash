@@ -127,13 +127,12 @@ function delay(milliseconds: number): Promise<void> {
     const route = `POST /api/token\n{ "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" }\nAuthorization: Bearer <agent-token>`;
 
     async function revokeConsentGroup(group: ConsentGroup) {
-        const spacing =
-            group.items.length > 10 ? 1100 : 0;
+        // The revoke endpoint shares the 10-per-10-second per-IP limiter with
+        // consent and auth handlers, so pace every request instead of
+        // assuming an empty bucket.
         const results = await Promise.allSettled(
             group.items.map(async (item, index) => {
-                if (spacing > 0 && index > 0) {
-                    await delay(index * spacing);
-                }
+                if (index > 0) await delay(index * 1200);
                 return client.api.consent.revoke.$post({
                     json: {
                         repo: item.repo,

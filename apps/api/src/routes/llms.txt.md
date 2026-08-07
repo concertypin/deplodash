@@ -111,6 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api
 
 The installer prompts for the long-lived agent token, stores it in a private runner under `~/.local/share/deplodash` rather than Git configuration, enables `credential.useHttpPath`, resets inherited GitHub helpers, and configures the helper. Use an HTTPS GitHub remote such as `https://github.com/owner/repo.git`. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set. If consent is required, it stops without prompting; open the consent URL printed to stderr, then retry `git push`.
 The installer runs `git config --global credential.https://github.com.useHttpPath true` and resets inherited helpers with `git config --global --replace-all credential.https://github.com.helper ""` before registering the Node runner.
+On Windows (no POSIX `/dev/tty`), set `DEPLODASH_AGENT_TOKEN` before running the installer to avoid a visible-input prompt.
 
 ## Permissions
 

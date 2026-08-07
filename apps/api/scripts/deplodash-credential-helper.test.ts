@@ -72,12 +72,17 @@ async function getResult(
     );
 }
 
+const SUCCESS_SCOPES = ["contents:write", "workflows:write"];
+
 void test("returns credentials for a successful token request", async () => {
     let request: Request | undefined;
     const result = await getResult(
         async (url, init) => {
             request = new Request(url, init);
-            return response(200, { token: "ghs_test" });
+            return response(200, {
+                token: "ghs_test",
+                effective_scopes: SUCCESS_SCOPES,
+            });
         },
         () => ({ success: true, stdout: "" })
     );
@@ -90,14 +95,18 @@ void test("returns credentials for a successful token request", async () => {
     assert.equal(request?.headers.get("authorization"), "Bearer agent-secret");
     assert.deepEqual(await request?.json(), {
         repo: "owner/repo",
-        scopes: ["contents:write", "workflows:write"],
+        scopes: SUCCESS_SCOPES,
     });
 });
 
 void test("scope override bypasses git probes", async () => {
     const runner = gitRunner([]);
     const result = await getResult(
-        async () => response(200, { token: "ghs_test" }),
+        async () =>
+            response(200, {
+                token: "ghs_test",
+                effective_scopes: ["contents:read", "workflows:write"],
+            }),
         runner.runGit,
         { DEPLODASH_SCOPES: " contents:read, workflows:write,contents:read " }
     );
@@ -113,12 +122,73 @@ void test("requests workflow permission conservatively when no override is set",
     const result = await getResult(async (_url, init) => {
         assert.deepEqual(await new Request(_url, init).json(), {
             repo: "owner/repo",
-            scopes: ["contents:write", "workflows:write"],
+            scopes: SUCCESS_SCOPES,
         });
-        return response(200, { token: "ghs_test" });
+        return response(200, {
+            token: "ghs_test",
+            effective_scopes: SUCCESS_SCOPES,
+        });
     }, runner.runGit);
     assert.equal(result.stdout.includes("ghs_test"), true);
     assert.equal(runner.calls.length, 0);
+});
+
+void test("rejects a token whose effective scopes are narrower than requested", async () => {
+    const result = await getResult(
+        async () =>
+            response(200, {
+                token: "ghs_test",
+                effective_scopes: ["contents:read"],
+            }),
+        () => ({ success: true, stdout: "" })
+    );
+    assert.equal(result.stdout, "quit=1\n\n");
+    assert.equal(result.stderr.includes("contents:write"), true);
+    assert.equal(result.stderr.includes("workflows:write"), true);
+    assert.equal(result.stderr.includes("ghs_test"), false);
+});
+
+void test("handles Git LFS paths and explicit default HTTPS port", async () => {
+    const lfsResult = await handleCredentialRequest(
+        "get",
+        "protocol=https\nhost=github.com\npath=/owner/repo.git/info/lfs/objects/batch\n\n",
+        env,
+        {
+            fetch: async (_url, init) => {
+                assert.deepEqual(await new Request(_url, init).json(), {
+                    repo: "owner/repo",
+                    scopes: SUCCESS_SCOPES,
+                });
+                return response(200, {
+                    token: "ghs_test",
+                    effective_scopes: SUCCESS_SCOPES,
+                });
+            },
+            runGit: () => ({ success: true, stdout: "" }),
+        }
+    );
+    assert.equal(
+        lfsResult.stdout,
+        "username=x-access-token\npassword=ghs_test\n\n"
+    );
+
+    const portResult = await handleCredentialRequest(
+        "get",
+        "protocol=https\nhost=github.com:443\npath=/owner/repo.git\n\n",
+        env,
+        {
+            fetch: async () =>
+                response(200, {
+                    token: "ghs_test",
+                    effective_scopes: SUCCESS_SCOPES,
+                }),
+            runGit: () => ({ success: true, stdout: "" }),
+        }
+    );
+    assert.equal(
+        portResult.stdout,
+        "username=x-access-token\npassword=ghs_test\n\n"
+    );
 });
 
 void test("ignores unsupported actions and contexts without work", async () => {
@@ -162,10 +232,13 @@ void test("returns quit for applicable failures without leaking secrets", async 
         () => ({ success: true, stdout: "" })
     );
     assert.equal(consent.stdout, "quit=1\n\n");
-    assert.equal(
-        consent.stderr.includes("https://example.test/auth/consent"),
-        true
-    );
+    const consentUrlMatch = /consent required: (\S+)/.exec(consent.stderr);
+    assert(consentUrlMatch);
+    const consentUrlValue = consentUrlMatch[1];
+    assert(consentUrlValue);
+    const consentUrl = new URL(consentUrlValue);
+    assert.equal(consentUrl.origin, "https://example.test");
+    assert.equal(consentUrl.pathname, "/auth/consent");
     assert.equal(consent.stderr.includes("agent-secret"), false);
 
     const malformed = await getResult(
@@ -207,7 +280,12 @@ void test("works through git credential fill with an isolated helper configurati
                 });
             }
             res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ token: "ghs_test" }));
+            res.end(
+                JSON.stringify({
+                    token: "ghs_test",
+                    effective_scopes: ["contents:write"],
+                })
+            );
         })().catch(() => {
             res.writeHead(500);
             res.end();
