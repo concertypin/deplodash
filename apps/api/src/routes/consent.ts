@@ -15,18 +15,20 @@ import type { GitHubClient } from "@/github";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
-import { decryptWith, getOrInitKey } from "@/crypto";
 import { notifyWaiters } from "@/token/wait-notifier";
 import { APPROVABLE_SCOPES, expandCompoundScopes } from "@/github/scopes";
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
 const consentSchema = z.object({
-    repo: z.string().min(1),
+    repo: z
+        .string()
+        .regex(
+            /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/,
+            "Invalid repository format"
+        ),
+    agent_id: z.string().min(1),
     scopes: z.union([z.string(), z.array(z.string())]).optional(),
-    requested_scopes: z.string().optional(),
-    requested_scopes_enc: z.string().optional(),
-    agent_id: z.string().min(1).optional(),
     repo_mode: z
         .enum(["existing-only", "create-if-missing"])
         .default("existing-only"),
@@ -67,90 +69,32 @@ export const consentRouter = new Hono<HonoEnv>()
     .post("/", authGuard(), validator("json", consentSchema), async (c) => {
         const {
             repo,
-            scopes: rawScopes,
-            requested_scopes: rawRequestedScopes,
-            requested_scopes_enc,
             agent_id,
+            scopes: rawScopes,
             repo_mode,
         } = c.req.valid("json");
-        // CSRF protection — validate Origin header
         const origin = c.req.header("Origin");
         if (origin && origin !== new URL(c.req.url).origin) {
             return c.json({ error: "CSRF detected" }, 403);
         }
-        // Validate authenticated consent context.
-        // If encrypted data is provided, decrypt and verify repo+agent_id match.
-        // When ENCRYPTION_SECRET is configured but no encrypted field is submitted,
-        // the request is rejected (prevents subset-validation bypass).
-        let requested_scopes = rawRequestedScopes;
-        let consentRepo = repo;
-        if (c.env.ENCRYPTION_SECRET) {
-            if (!requested_scopes_enc) {
-                return c.json(
-                    {
-                        error: "Invalid consent request. Missing encrypted payload.",
-                    },
-                    400
-                );
-            }
-            try {
-                const key = await getOrInitKey(c.env.ENCRYPTION_SECRET);
-                const decrypted = await decryptWith(
-                    key,
-                    requested_scopes_enc,
-                    "consent-request"
-                );
-                if (decrypted === null) throw new Error("Decrypt failed");
-                const consentContextSchema = z.object({
-                    version: z.literal(1),
-                    purpose: z.literal("consent-request"),
-                    repo: z.string().min(1),
-                    agent_id: z.string().min(1),
-                    scopes: z.string().min(1),
-                    repo_mode: z
-                        .enum(["existing-only", "create-if-missing"])
-                        .optional(),
-                });
-                const ctx = consentContextSchema.parse(JSON.parse(decrypted));
-                // Verify repo binding — prevents cross-repo replay
-                if (ctx.repo.toLowerCase() !== repo.toLowerCase()) {
-                    throw new Error("Repo mismatch");
-                }
-                // Verify agent_id binding — prevents cross-agent redirect
-                if (ctx.agent_id !== agent_id) {
-                    throw new Error("Agent mismatch");
-                }
-                consentRepo = ctx.repo;
-                requested_scopes = ctx.scopes;
-            } catch {
-                return c.json(
-                    {
-                        error: "Invalid consent request. Please try again from the agent's link.",
-                    },
-                    400
-                );
-            }
-        }
-        const tokenService = new TokenService(c.env.KV);
-        // Rate limiting — per-IP throttle for consent endpoints
+
         const consentRateLimiter = c.env.TOKEN_RATE_LIMITER;
         if (consentRateLimiter) {
             try {
                 const { success } = await consentRateLimiter.limit({
                     key: c.req.header("CF-Connecting-IP") || "unknown",
                 });
-                if (!success) {
+                if (!success)
                     return c.json(
                         { error: "Rate limited. Try again later." },
                         429
                     );
-                }
             } catch {
-                // Rate limiter unavailable (e.g., local dev) — proceed
+                // Rate limiter unavailable — proceed.
             }
         }
+
         try {
-            // Handle empty scopes — no checkboxes were checked
             if (!rawScopes) {
                 return c.json(
                     {
@@ -159,25 +103,26 @@ export const consentRouter = new Hono<HonoEnv>()
                     400
                 );
             }
-            // Normalize scopes — handle both single comma-separated string and array from checkboxes.
-            // Deduplicate to ensure clean data in KV.
-            const scopeList: string[] = [
+            const scopeList = [
                 ...new Set(
                     Array.isArray(rawScopes)
-                        ? rawScopes.map((s) => s.trim()).filter(Boolean)
+                        ? rawScopes.map((scope) => scope.trim()).filter(Boolean)
                         : rawScopes
                               .split(",")
-                              .map((s) => s.trim())
+                              .map((scope) => scope.trim())
                               .filter(Boolean)
                 ),
             ];
-            // Expand compound scopes (e.g. "admin") into granular components
-            // before validation, so the APPROVABLE_SCOPES and subset checks
-            // operate on individual approvable scopes only.
+            if (scopeList.length === 0) {
+                return c.json(
+                    {
+                        error: "You must select at least one permission to proceed.",
+                    },
+                    400
+                );
+            }
             const expandedList = expandCompoundScopes(scopeList);
-            scopeList.length = 0;
-            scopeList.push(...expandedList);
-            const unsupportedScopes = scopeList.filter(
+            const unsupportedScopes = expandedList.filter(
                 (scope) => !APPROVABLE_SCOPES.has(scope)
             );
             if (unsupportedScopes.length > 0) {
@@ -188,55 +133,19 @@ export const consentRouter = new Hono<HonoEnv>()
                     400
                 );
             }
-            // Parse the originally requested scopes once and reuse for both
-            // audit tracking and subset validation.
-            const requestedList: string[] | undefined =
-                typeof requested_scopes === "string"
-                    ? requested_scopes
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                    : undefined;
-            // Also expand compound scopes in the requested list so that
-            // subset validation remains correct even when the original token
-            // endpoint did not expand them (e.g. legacy encrypted payloads).
-            const expandedRequested =
-                requestedList !== undefined
-                    ? expandCompoundScopes(requestedList)
-                    : undefined;
-            // Validate that approved scopes are a subset of the originally requested scopes.
-            if (expandedRequested) {
-                const invalidScopes = scopeList.filter(
-                    (s) => !expandedRequested.includes(s)
-                );
-                if (invalidScopes.length > 0) {
-                    return c.json(
-                        {
-                            error: `Cannot approve scopes not in the original request: ${invalidScopes.join(", ")}`,
-                        },
-                        400
-                    );
-                }
-            }
-            // Resolve the authenticated GitHub user for audit trail
+
             const ghClient = c.get("client")!;
             let grantedBy: string;
             try {
-                const ghUser = await ghClient.getUser();
-                grantedBy = ghUser.login;
+                grantedBy = (await ghClient.getUser()).login;
             } catch {
                 return c.json(
                     { error: "Failed to verify identity. Please try again." },
                     401
                 );
             }
-            // Verify the user has administrative authority on the repository
             try {
-                await assertApproverCanGrantConsent(
-                    ghClient,
-                    grantedBy,
-                    consentRepo
-                );
+                await assertApproverCanGrantConsent(ghClient, grantedBy, repo);
             } catch (err: unknown) {
                 return c.json(
                     {
@@ -249,47 +158,57 @@ export const consentRouter = new Hono<HonoEnv>()
                 );
             }
 
-            // Create missing repositories with the authenticated OAuth user
-            // token. Installation tokens cannot create personal repositories.
+            const tokenService = new TokenService(c.env.KV);
             if (repo_mode === "create-if-missing") {
-                const [owner, name] = consentRepo.split("/");
+                const [owner, name] = repo.split("/");
                 if (
                     owner &&
                     name &&
                     !(await ghClient.repoExists(owner, name))
                 ) {
-                    await ghClient.createRepository(
-                        owner,
-                        name,
-                        true,
-                        grantedBy
-                    );
+                    try {
+                        await ghClient.createRepository(
+                            owner,
+                            name,
+                            true,
+                            grantedBy
+                        );
+                    } catch (error: unknown) {
+                        if (
+                            !(
+                                error instanceof Error &&
+                                error.message.startsWith("GitHub 422")
+                            ) ||
+                            !(await ghClient.repoExists(owner, name))
+                        ) {
+                            throw error;
+                        }
+                    }
                 }
             }
-            // Grant all requested scopes — duplicates are handled by TokenService
-            for (const scope of scopeList) {
+            for (const scope of expandedList) {
                 await tokenService.recordConsent(
-                    agent_id ?? "",
-                    consentRepo,
+                    agent_id,
+                    repo,
                     [scope],
-                    requestedList ?? undefined,
+                    expandedList,
                     grantedBy,
                     repo_mode
                 );
             }
-            console.log(
-                `GRANT: repo=${consentRepo} scopeList=${JSON.stringify(
-                    scopeList
-                )} scopes=${String(rawScopes ?? "")} grantedBy=${grantedBy}`
-            );
-            // Notify any waiters that consent has been granted
-            notifyWaiters(consentRepo, agent_id ?? "");
+            notifyWaiters(repo, agent_id);
             return c.json({ status: "ok" });
         } catch (err: unknown) {
             console.error("consent: failed to grant consent", err);
-            const msg =
-                err instanceof Error ? err.message : "Failed to grant consent";
-            return c.json({ error: msg }, 500);
+            return c.json(
+                {
+                    error:
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to grant consent",
+                },
+                500
+            );
         }
     })
     .post(

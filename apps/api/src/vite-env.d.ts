@@ -1,6 +1,4 @@
 /// <reference types="vite/client" />
-/// <reference types="vitest/importMeta" />
-
 interface ImportMetaEnv extends Readonly<{
     /**
      * Indicates if the current environment is Vitest (testing environment).
@@ -14,9 +12,4 @@ interface ImportMeta {
 }
 interface ViteTypeOptions {
     strictImportMetaEnv: unknown;
-}
-declare module "cloudflare:workers" {
-    interface ProvidedEnv {
-        KV: KVNamespace;
-    }
 }

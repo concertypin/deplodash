@@ -6,7 +6,6 @@ import { hashScopes } from "@/github/scopes";
 describe("TokenService — consent", () => {
     let kv: FakeKV;
     let service: TokenService;
-
     beforeEach(() => {
         kv = new FakeKV();
         service = new TokenService(kv as unknown as KVNamespace);
@@ -61,18 +60,203 @@ describe("TokenService — consent", () => {
             expect(result).toBe(false);
         });
 
+        it("finds consent stored under the pre-normalization key casing", async () => {
+            // Simulate a grant recorded before repo normalization: the KV key
+            // uses the original casing "Owner/Repo".
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                })
+            );
+
+            // The agent retrying with the original casing must still find the
+            // pre-normalization grant (fallback to the legacy key format).
+            expect(
+                await service.checkConsent("test-agent", "Owner/Repo", scopes)
+            ).toBe(true);
+            expect(
+                await service.findConsentScopes(
+                    "test-agent",
+                    "Owner/Repo",
+                    scopes
+                )
+            ).toEqual(scopes);
+        });
+
+        it("finds a pre-normalization grant when retried with a different casing", async () => {
+            // Grant stored under "Owner/Repo" before normalization; the agent
+            // retries with "owner/repo". The exact-key fallback cannot match
+            // (keys differ), so the case-insensitive prefix scan must find it.
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                })
+            );
+
+            expect(
+                await service.checkConsent("test-agent", "owner/repo", scopes)
+            ).toBe(true);
+            expect(
+                await service.findConsentScopes(
+                    "test-agent",
+                    "owner/repo",
+                    scopes
+                )
+            ).toEqual(scopes);
+            expect(
+                await service.getAllApprovedScopes("test-agent", "owner/repo")
+            ).toEqual(["contents:read"]);
+        });
+
+        it("revokes a pre-normalization grant when called with a different casing", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "testuser",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "testuser"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+        });
+
+        it("revokes consent stored under the pre-normalization key casing", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "testuser",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "Owner/Repo",
+                scopes,
+                "testuser"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+            expect(
+                await service.checkConsent("test-agent", "Owner/Repo", scopes)
+            ).toBe(false);
+        });
+
+        it("revokes only the caller's record when the tuple has two owners", async () => {
+            // Alice's pre-normalization grant and Bob's normalized grant share
+            // the same agent/repo/scope tuple. Each owner must be able to
+            // revoke their own record without the other's blocking it.
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            const normalizedKey = `consent:test-agent:owner/repo:${hash}`;
+            const grantedAt = new Date().toISOString();
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: grantedAt,
+                    granted_by: "alice",
+                })
+            );
+            await kv.put(
+                normalizedKey,
+                JSON.stringify({
+                    repo: "owner/repo",
+                    scopes: "contents:read",
+                    granted_at: grantedAt,
+                    granted_by: "bob",
+                })
+            );
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "alice"
+            );
+            expect(await kv.get(legacyKey)).toBeNull();
+            expect(await kv.get(normalizedKey)).not.toBeNull();
+
+            await service.revokeConsent(
+                "test-agent",
+                "owner/repo",
+                scopes,
+                "bob"
+            );
+            expect(await kv.get(normalizedKey)).toBeNull();
+        });
+
+        it("rejects revoking a legacy-key consent owned by another user", async () => {
+            const scopes = ["contents:read"];
+            const hash = await hashScopes(scopes);
+            const legacyKey = `consent:test-agent:Owner/Repo:${hash}`;
+            await kv.put(
+                legacyKey,
+                JSON.stringify({
+                    repo: "Owner/Repo",
+                    scopes: "contents:read",
+                    granted_at: new Date().toISOString(),
+                    granted_by: "someone-else",
+                })
+            );
+
+            await expect(
+                service.revokeConsent(
+                    "test-agent",
+                    "Owner/Repo",
+                    scopes,
+                    "testuser"
+                )
+            ).rejects.toThrow("You can only revoke your own consents.");
+            expect(await kv.get(legacyKey)).not.toBeNull();
+        });
+
         it("deletes malformed consent records when read", async () => {
             const scopes = ["contents:read"];
             const repo = "broken/repo";
             const hash = await hashScopes(scopes);
             const key = `consent:test-agent:${repo}:${hash}`;
-            await kv.put(
-                key,
-                JSON.stringify({ granted_at: "2026-06-16T12:14:54.136Z" })
-            );
+            // Insert a schema-violating (but JSON-parseable) record so
+            // requestToken exercises the malformed-record cleanup path
+            // (not just an empty namespace).
+            await kv.put(key, JSON.stringify({ unexpected: "shape" }));
 
             const result = await service.requestToken(
-                { repo, scopes, baseUrl: "http://test", agentId: "test-agent" },
+                {
+                    repo,
+                    scopes,
+                    baseUrl: "http://test",
+                    agentId: "test-agent",
+                },
                 () =>
                     Promise.resolve({
                         token: "ghs_test",

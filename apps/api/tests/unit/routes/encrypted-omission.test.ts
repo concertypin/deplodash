@@ -1,71 +1,117 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { contains } from "@tests/helpers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import type { HonoEnv } from "@/types";
+import { env } from "cloudflare:workers";
 import { consentRouter } from "@/routes/consent";
 import { sessionMiddleware } from "@/middleware";
-import { env } from "cloudflare:workers";
+import type { HonoEnv } from "@/types";
+import { makeBaseEnv } from "@tests/helpers";
 
 const BASE_ENV: HonoEnv["Bindings"] = {
-    ENCRYPTION_SECRET: "test-secret-1234567890123456",
-    GITHUB_CLIENT_ID: "test-client",
-    GITHUB_CLIENT_SECRET: "test-secret",
-    CALLBACK_URL: "http://localhost:5178/callback",
+    ...makeBaseEnv(),
     KV: env.KV,
-    GITHUB_APP_ID: "123456",
-    GITHUB_APP_PRIVATE_KEY:
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+    GITHUB_TOKEN: "ghp_test_user_token",
 };
 
-describe("Encrypted consent field omission (KV required)", () => {
-    let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
-
+describe("Direct consent request validation", () => {
     beforeEach(async () => {
         const { keys } = await env.KV.list();
-        await Promise.all(keys.map((k) => env.KV.delete(k.name)));
-        mockFetch = vi.fn<typeof fetch>();
-        mockFetch.mockResolvedValue(
-            Response.json({
-                login: "testuser",
-                id: 1,
-                avatar_url: "",
-                name: "Test User",
-            })
+        await Promise.all(keys.map((key) => env.KV.delete(key.name)));
+        vi.stubGlobal(
+            "fetch",
+            vi.fn<typeof fetch>(() =>
+                Promise.resolve(
+                    Response.json({
+                        login: "testuser",
+                        id: 1,
+                        avatar_url: "",
+                        name: "Test User",
+                    })
+                )
+            )
         );
-        vi.stubGlobal("fetch", mockFetch);
     });
 
     afterEach(() => {
         vi.unstubAllGlobals();
     });
 
-    it("omitting encrypted field is rejected when ENCRYPTION_SECRET is configured", async () => {
-        const authEnv: HonoEnv["Bindings"] = {
-            ...BASE_ENV,
-            GITHUB_TOKEN: "ghp_test_user_token",
-        };
+    it("rejects a direct request without a repository", async () => {
         const app = new Hono<HonoEnv>()
             .use("*", sessionMiddleware())
             .route("/api/consent", consentRouter);
-
-        const resp = await app.fetch(
+        const response = await app.fetch(
             new Request("http://localhost/api/consent", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    repo: "injected/repo",
+                    agent_id: "test-agent",
                     scopes: "contents:read",
-                    requested_scopes: "contents:read",
-                    agent_id: "injected-agent",
                 }),
             }),
-            authEnv
+            BASE_ENV
         );
-        expect(resp.status).toBe(400);
-        const body = await resp.json();
-        contains(body, "error");
-        expect(body.error).toContain(
-            "Invalid consent request. Missing encrypted payload."
+
+        expect(response.status).toBe(400);
+    });
+
+    it("rejects direct consent with no usable scopes", async () => {
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+        const response = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    agent_id: "test-agent",
+                    scopes: ",",
+                }),
+            }),
+            BASE_ENV
         );
+
+        expect(response.status).toBe(400);
+    });
+
+    it("rejects malformed repository identifiers", async () => {
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+        const response = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo/extra",
+                    agent_id: "test-agent",
+                    scopes: "contents:read",
+                }),
+            }),
+            BASE_ENV
+        );
+
+        expect(response.status).toBe(400);
+    });
+
+    it("accepts direct consent parameters from a proactive approval", async () => {
+        const app = new Hono<HonoEnv>()
+            .use("*", sessionMiddleware())
+            .route("/api/consent", consentRouter);
+        const response = await app.fetch(
+            new Request("http://localhost/api/consent", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    repo: "testuser/repo",
+                    agent_id: "test-agent",
+                    scopes: "contents:read",
+                    repo_mode: "existing-only",
+                }),
+            }),
+            BASE_ENV
+        );
+
+        expect(response.status).toBe(200);
     });
 });

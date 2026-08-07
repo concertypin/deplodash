@@ -16,7 +16,7 @@ Agent tokens are long-lived strings stored in Cloudflare KV. Provision one from 
 
 ### Session auth for user pages and consent
 
-Browser flows such as `GET /auth/github`, `GET /auth/consent`, and `GET /api/user/token` use the session cookie created by the GitHub OAuth flow.
+Browser flows such as `GET /auth/github`, `GET /auth/consent`, and `GET /api/user/token` use the session cookie created by the GitHub OAuth flow. A human may open a consent URL directly from the dashboard or follow the URL returned by an agent token request.
 
 ## Endpoints
 
@@ -36,7 +36,7 @@ Request a token for a specific repository with desired permissions.
 
 The optional `repo_mode` field (`"existing-only"` or `"create-if-missing"`) indicates whether the agent intends to create the repository if it does not exist. Default is `"existing-only"`, which never creates a repository. With `"create-if-missing"`, the consent page offers the option to create a private repository, but only after explicit human approval. Repository existence is not reported before consent.
 
-**Available scopes:** `contents:read`, `contents:write`, `workflows:write`, `admin`
+**Available scopes:** `contents:read`, `contents:write`, `workflows:write`, `issues:read`, `issues:write`, `pulls:read`, `pulls:write`, `actions:read`, `actions:write`, `checks:read`, `checks:write`, `variables:read`, `variables:write`, `metadata:read`, `deployments:read`, `deployments:write`, `environments:read`, `environments:write`, `administration:read`, `administration:write`, `members:read`, `members:write`, `secrets:read`, `secrets:write`, `pages:read`, `pages:write`, `webhooks:read`, `webhooks:write`. Compound presets (`admin`, `contents:write+workflows:write`) are accepted and expanded to their constituent granular scopes.
 
 **Response (ok):**
 
@@ -51,16 +51,20 @@ The optional `repo_mode` field (`"existing-only"` or `"create-if-missing"`) indi
 
 The returned `effective_scopes` may be narrower than the requested scopes if the repo has only partial consent on record.
 
+If consent is not already recorded, the API returns a direct consent URL:
+
 ```json
 {
     "status": "needs_consent",
-    "url": "{{BASE}}/auth/consent?repo=owner/repo&scopes=contents%3Awrite&repo_mode=existing-only",
+    "url": "{{BASE}}/auth/consent?repo=owner%2Frepo-name&agent_id=my-agent&scopes=contents%3Awrite&repo_mode=existing-only",
     "requested_scopes": ["contents:write"],
     "approved_scopes": ["contents:read"]
 }
 ```
 
-The consent URL contains `repo_mode`, but never reports repository existence before human approval. A token request with `repo_mode: "create-if-missing"` can create a private repository only when both the current request and the human's stored consent use `"create-if-missing"`. If the repository is missing and either condition is not met, the token request fails with `Repository not found and creation was not approved.`
+The URL carries the repository, agent ID, requested scopes, and repository mode so a human can approve either an agent-initiated request or a proactive dashboard authorization. The consent page requires an authenticated GitHub session. The server validates the repository authority, approvable scopes, repository mode, and GitHub identity before recording a reusable consent grant in KV.
+
+The consent grant can be approved again with the same parameters; approval is not a one-time transaction. Consent records expire after 90 days and can be revoked from the dashboard.
 
 ### QUERY /api/wait — Wait for User Consent (Long Polling)
 

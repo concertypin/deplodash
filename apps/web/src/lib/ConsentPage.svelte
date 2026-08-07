@@ -1,34 +1,62 @@
 <script lang="ts">
     import { client } from "@/lib/api";
-    import { approvableScopeIds, scopeCategories } from "@/lib/scopes";
+    import { approvableScopeIds, scopeCategories, expandCompoundScopes } from "@/lib/scopes";
     import { SvelteSet } from "svelte/reactivity";
 
-    const params = new URLSearchParams(window.location.search);
-    const repo = params.get("repo") ?? "";
-    const scopes = params.get("scopes") ?? "";
-    const agentId = params.get("agent_id");
-    const requestedScopesEnc = params.get("requested_scopes_enc");
+    type RepositoryMode = "existing-only" | "create-if-missing";
+    type ConsentRequest = {
+        repo: string;
+        agent_id: string;
+        scopes: string[];
+        repo_mode: RepositoryMode;
+    };
 
-    let selectedScopes = new SvelteSet(
-        scopes
-            .split(",")
-            .map((s) => s.trim())
-            .filter((scope) => approvableScopeIds.has(scope))
-    );
-    let error = $state<string | null>(null);
-
-    function toggleScope(scope: string) {
-        if (selectedScopes.has(scope)) {
-            selectedScopes.delete(scope);
-        } else {
-            selectedScopes.add(scope);
-        }
+    function isUser(value: unknown): value is { login: string; avatarUrl: string } {
+        if (typeof value !== "object" || value === null) return false;
+        const candidate = Object.fromEntries(Object.entries(value));
+        return (
+            typeof candidate.login === "string" &&
+            typeof candidate.avatarUrl === "string"
+        );
     }
+
+    function isConsentError(value: unknown): value is { error: string } {
+        if (typeof value !== "object" || value === null) return false;
+        const candidate = Object.fromEntries(Object.entries(value));
+        return typeof candidate.error === "string";
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const repoParam = params.get("repo");
+    const agentIdParam = params.get("agent_id");
+    const scopesParam = params.get("scopes");
+    const consentRequest: ConsentRequest | null =
+        repoParam && agentIdParam && scopesParam
+            ? {
+                  repo: repoParam,
+                  agent_id: agentIdParam,
+                  scopes: scopesParam
+                      .split(",")
+                      .map((scope) => scope.trim())
+                      .filter(Boolean),
+                  repo_mode:
+                      params.get("repo_mode") === "create-if-missing"
+                          ? "create-if-missing"
+                          : "existing-only",
+              }
+            : null;
+
+    let selectedScopes = new SvelteSet<string>();
+    let error = $state<string | null>(null);
 
     type PageState =
         | { kind: "loading" }
         | { kind: "error"; message: string }
-        | { kind: "ready"; user: { login: string; avatarUrl: string } };
+        | {
+              kind: "ready";
+              user: { login: string; avatarUrl: string };
+              request: ConsentRequest;
+          };
 
     let page = $state<PageState>({ kind: "loading" });
 
@@ -42,14 +70,23 @@
                 window.location.href = `/auth/github?next=${returnUrl}`;
                 return;
             }
-            if (!res.ok) {
+            const userData: unknown = await res.json();
+            if (!res.ok || !consentRequest || !isUser(userData)) {
                 page = {
                     kind: "error",
-                    message: "Authentication check failed",
+                    message: "Invalid consent request",
                 };
                 return;
             }
-            page = { kind: "ready", user: await res.json() };
+            selectedScopes.clear();
+            expandCompoundScopes(consentRequest.scopes)
+                .filter((scope) => approvableScopeIds.has(scope))
+                .forEach((scope) => selectedScopes.add(scope));
+            page = {
+                kind: "ready",
+                user: userData,
+                request: consentRequest,
+            };
         } catch (e) {
             page = {
                 kind: "error",
@@ -61,29 +98,41 @@
         }
     })();
 
-    async function handleGrant(mode: "existing-only" | "create-if-missing") {
+    function toggleScope(scope: string) {
+        if (selectedScopes.has(scope)) {
+            selectedScopes.delete(scope);
+        } else {
+            selectedScopes.add(scope);
+        }
+    }
+
+    async function handleGrant() {
         error = null;
+        if (page.kind !== "ready") return;
         const scopeList = Array.from(selectedScopes);
 
         try {
-            const res = await client.api.consent.$post({
-                json: {
-                    repo,
+            const res = await fetch("/api/consent", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    repo: page.request.repo,
+                    agent_id: page.request.agent_id,
+                    repo_mode: page.request.repo_mode,
                     scopes: scopeList.join(","),
-                    requested_scopes: scopes,
-                    requested_scopes_enc: requestedScopesEnc ?? undefined,
-                    agent_id: agentId ?? undefined,
-                    repo_mode: mode,
-                },
+                }),
             });
-            const data = await res.json();
+            const data: unknown = await res.json();
             if (res.ok) {
                 window.location.href = "/";
-            } else if ("error" in data) {
+            } else if (isConsentError(data)) {
                 error = data.error;
+            } else {
+                error = "Failed to submit consent";
             }
         } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to submit consent";
+            error =
+                e instanceof Error ? e.message : "Failed to submit consent";
         }
     }
 
@@ -130,95 +179,98 @@
             </div>
         </nav>
         <div class="max-w-lg mx-auto px-6 py-12">
-            <div
-                class="bg-base-100 rounded-box shadow-sm border border-base-200 p-8"
-            >
-                <h2 class="text-2xl font-bold text-base-content mb-2">
-                    Authorization Required
-                </h2>
-                <p class="text-base-content/70 mb-6">
-                    An agent wants to access repository
-                    <strong class="text-base-content">{repo}</strong>
-                    with the following permissions:
-                </p>
-
-
-                {#if scopes}
-                    <div
-                        class="mb-6"
-                        role="group"
-                        aria-label="Select permissions to grant"
-                    >
-                        <p
-                            class="text-sm font-semibold text-base-content/80 mb-3"
+            <div class="card bg-base-100 card-border shadow-sm">
+                <div class="card-body">
+                    <h2 class="card-title text-2xl">
+                        Authorization Required
+                    </h2>
+                    <p class="text-base-content/70 mb-6">
+                        Agent
+                        <strong class="text-base-content"
+                            >{page.request.agent_id}</strong
                         >
-                            Select permissions to grant:
-                        </p>
-                        {#each scopeCategories as category (category.label)}
-                            <fieldset class="mb-4">
-                                <legend
-                                    class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-2"
-                                    >{category.label}</legend
-                                >
-                                <div class="space-y-2">
-                                    {#each category.scopes as scope (scope.id)}
-                                        <label
-                                            class="flex items-start gap-3 cursor-pointer"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedScopes.has(
-                                                    scope.id
-                                                )}
-                                                onchange={() =>
-                                                    toggleScope(scope.id)}
-                                                class="checkbox checkbox-sm mt-1"
-                                            />
-                                            <div>
-                                                <span
-                                                    class="text-sm font-medium text-base-content"
-                                                    >{scope.id}</span
-                                                >
-                                                <p
-                                                    class="text-xs text-base-content/60"
-                                                >
-                                                    {scope.description}
-                                                </p>
-                                            </div>
-                                        </label>
-                                    {/each}
-                                </div>
-                            </fieldset>
-                        {/each}
-                    </div>
-                {/if}
+                        wants to access repository
+                        <strong class="text-base-content"
+                            >{page.request.repo}</strong
+                        >
+                        with the following permissions:
+                    </p>
+                    {#if page.request.scopes.length > 0}
+                        <div
+                            class="mb-6"
+                            role="group"
+                            aria-label="Select permissions to grant"
+                        >
+                            <p
+                                class="text-sm font-semibold text-base-content/80 mb-3"
+                            >
+                                Select permissions to grant:
+                            </p>
+                            {#each scopeCategories as category (category.label)}
+                                <fieldset class="mb-4">
+                                    <legend
+                                        class="text-xs font-medium text-base-content/60 uppercase tracking-wider mb-2"
+                                        >{category.label}</legend
+                                    >
+                                    <div class="space-y-2">
+                                        {#each category.scopes as scope (scope.id)}
+                                            <label
+                                                class="flex items-start gap-3 cursor-pointer"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedScopes.has(
+                                                        scope.id
+                                                    )}
+                                                    onchange={() =>
+                                                        toggleScope(scope.id)}
+                                                    class="checkbox checkbox-sm mt-1"
+                                                />
+                                                <div>
+                                                    <span
+                                                        class="text-sm font-medium text-base-content"
+                                                        >{scope.id}</span
+                                                    >
+                                                    <p
+                                                        class="text-xs text-base-content/60"
+                                                    >
+                                                        {scope.description}
+                                                    </p>
+                                                </div>
+                                            </label>
+                                        {/each}
+                                    </div>
+                                </fieldset>
+                            {/each}
+                        </div>
+                    {/if}
 
-                {#if error}
-                    <div
-                        class="bg-error/10 border border-error/20 text-error rounded-box p-3 mb-4 text-sm"
-                        role="alert"
-                    >
-                        {error}
+                    {#if error}
+                        <div class="alert alert-error mb-4 text-sm" role="alert">
+                            {error}
+                        </div>
+                    {/if}
+                    <div class="card-actions flex gap-3">
+                        {#if page.request.repo_mode === "create-if-missing"}
+                            <button
+                                onclick={handleGrant}
+                                class="btn btn-outline flex-1"
+                                title="Create {page.request.repo} as a private repository only if it is missing."
+                            >
+                                Create private repo &amp; allow
+                            </button>
+                        {:else}
+                            <button
+                                onclick={handleGrant}
+                                class="btn btn-neutral flex-1"
+                            >
+                                Grant Access
+                            </button>
+                        {/if}
+                        <button onclick={handleDeny} class="btn btn-ghost flex-1">
+                            Cancel
+                        </button>
                     </div>
-                {/if}
-
-                <div class="flex gap-3">
-                    <button
-                        onclick={() => handleGrant("existing-only")}
-                        class="btn btn-neutral flex-1"
-                    >
-                        Grant Access
-                    </button>
-                    <button
-                        onclick={() => handleGrant("create-if-missing")}
-                        class="btn btn-outline flex-1"
-                        title="Create {repo} as a private repository only if it is missing."
-                    >
-                        Create private repo &amp; allow
-                    </button>
-                    <button onclick={handleDeny} class="btn btn-ghost flex-1">
-                        Cancel
-                    </button>
                 </div>
             </div>
         </div>

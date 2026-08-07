@@ -75,6 +75,28 @@
     let labelInput = $state("");
     let isSubmitting = $state(false);
 
+    let preauthorizeModal = $state<HTMLDialogElement | null>(null);
+    let preauthorizeRepo = $state("");
+    let preauthorizeAgent = $state("");
+    let preauthorizeScopes = $state("contents:read");
+
+    function openPreauthorize(tokens: AgentToken[]) {
+        error = null;
+        preauthorizeRepo = "";
+        preauthorizeAgent = tokens[0]?.agent_id ?? "";
+        preauthorizeScopes = "contents:read";
+        preauthorizeModal?.showModal();
+    }
+    function openConsentPage() {
+        const params = new URLSearchParams({
+            repo: preauthorizeRepo.trim(),
+            agent_id: preauthorizeAgent,
+            scopes: preauthorizeScopes,
+            repo_mode: "existing-only",
+        });
+        window.location.href = `/auth/consent?${params.toString()}`;
+    }
+
     function openModal() {
         error = null;
         agentIdInput = "";
@@ -379,13 +401,70 @@
                         <button>close</button>
                     </form>
                 </dialog>
+                <dialog bind:this={preauthorizeModal} class="modal">
+                    <div class="modal-box">
+                        <h3 class="text-lg font-bold">Pre-authorize access</h3>
+                        <p class="py-2 text-sm text-base-content/70">
+                            Approve an agent before it requests a token.
+                        </p>
+                        <div class="py-4 flex flex-col gap-3">
+                            <input
+                                bind:value={preauthorizeRepo}
+                                placeholder="owner/repository"
+                                class="input input-bordered w-full"
+                            />
+                            <select
+                                bind:value={preauthorizeAgent}
+                                class="select select-bordered w-full"
+                            >
+                                {#each agentTokens as token (token.token)}
+                                    <option value={token.agent_id}>
+                                        {token.agent_id}
+                                    </option>
+                                {/each}
+                            </select>
+                            <input
+                                bind:value={preauthorizeScopes}
+                                placeholder="contents:read"
+                                class="input input-bordered w-full"
+                            />
+                        </div>
+                        <div class="modal-action">
+                            <button
+                                onclick={() => preauthorizeModal?.close()}
+                                class="btn btn-outline"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onclick={openConsentPage}
+                                disabled={!preauthorizeRepo.trim() || !preauthorizeAgent}
+                                class="btn btn-primary"
+                            >
+                                Continue to consent
+                            </button>
+                        </div>
+                    </div>
+                    <form method="dialog" class="modal-backdrop">
+                        <button>close</button>
+                    </form>
+                </dialog>
                 <!-- Consents -->
                 <div
                     class="bg-base-100 rounded-box shadow-sm border border-base-200 p-6"
                 >
-                    <h3 class="text-lg font-semibold text-base-content mb-4">
-                        Authorized Repositories
-                    </h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-base-content">
+                            Authorized Repositories
+                        </h3>
+                        <button
+                            onclick={() => openPreauthorize(agentTokens)}
+                            class="btn btn-primary btn-sm"
+                            disabled={agentTokens.length === 0}
+                        >
+                            Pre-authorize
+                        </button>
+                    </div>
 
                     {#if consents.length === 0}
                         <div class="text-center py-8 text-base-content/60">

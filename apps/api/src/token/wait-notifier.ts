@@ -4,13 +4,15 @@
  * but requests hitting the same isolate can share module-level state.
  */
 
+import { normalizeRepo } from "@/helpers";
+
 type WaitCallback = () => void;
 
 // Key format: `${repo}:${agentId}`
 const pendingWaiters = new Map<string, Array<WaitCallback>>();
 
 function getKey(repo: string, agentId: string): string {
-    return `${repo}:${agentId}`;
+    return `${normalizeRepo(repo)}:${agentId}`;
 }
 
 export function addWaiter(

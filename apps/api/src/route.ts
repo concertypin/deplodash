@@ -14,9 +14,7 @@ import { llmsRouter } from "@/routes/llms";
  * Mount point hierarchy:
  *   /auth      → auth (OAuth start — /auth/github)
  *   /api       → API token (/api/token)
- *   /api/user  → User API (/api/user/me, /api/user/consents, /api/user/token, /api/user/agent/*)
  *   /api/consent    → Consent API (/api/consent, /api/consent/revoke)
- *   (root)     → oauth (/callback, /logout)
  *   /llms.txt  → LLM agent documentation
  *
  * — OAuth routes, consent routes, and user routes. token API and
