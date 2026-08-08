@@ -31,9 +31,7 @@ describe("GET /llms.txt", () => {
         expect(text).toContain("install-credential-helper.sh");
         expect(text).toContain("~/.local/share/deplodash");
         expect(text).toContain("credential.useHttpPath");
-        expect(text).toContain(
-            "without removing your existing credential providers"
-        );
+        expect(text).toContain("which remain usable as fallback");
         expect(resp.headers.get("Content-Type")).toContain("text/markdown");
     });
 });

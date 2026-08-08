@@ -89,14 +89,31 @@ void test("installs the helper ahead of existing GitHub helpers and replaces pri
                 ? result.stdout.split(/\r?\n/).filter((line) => line.length > 0)
                 : [];
         };
+        const configList = () => {
+            const result = spawnSync("git", ["config", "--global", "--list"], {
+                env: isolatedEnv,
+                encoding: "utf8",
+            });
+            return result.status === 0
+                ? result.stdout.split(/\r?\n/).filter((line) => line.length > 0)
+                : [];
+        };
 
-        // Pre-existing GitHub-scoped helper must be retained as a fallback.
+        // Pre-existing GitHub-scoped AND generic helpers must be retained as
+        // a fallback, with the Deplodash runner moved ahead of both.
         configure([
             "config",
             "--global",
             "--add",
             "credential.https://github.com.helper",
             "!fake-helper",
+        ]);
+        configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.helper",
+            "!fake-generic",
         ]);
 
         const first = await runProcess("node", [installerPath], {
@@ -114,6 +131,22 @@ void test("installs the helper ahead of existing GitHub helpers and replaces pri
         );
         assert.equal(entries[1], "!fake-helper");
 
+        // The generic helper is preserved and registered after Deplodash so
+        // it is consulted only when the Deplodash helper returns nothing.
+        let list = configList();
+        const deplodashIndex = list.findIndex((line) =>
+            line.includes("deplodash-credential-helper-run.mjs")
+        );
+        const genericIndex = list.findIndex((line) =>
+            line.includes("credential.helper=!fake-generic")
+        );
+        assert(deplodashIndex >= 0);
+        assert(genericIndex >= 0);
+        assert(
+            deplodashIndex < genericIndex,
+            `expected Deplodash before generic helper, got ${JSON.stringify(list)}`
+        );
+
         // Reinstalling (e.g. rotating the token) must not stack duplicates.
         const second = await runProcess("node", [installerPath], {
             env: isolatedEnv,
@@ -128,6 +161,16 @@ void test("installs the helper ahead of existing GitHub helpers and replaces pri
             true
         );
         assert.equal(entries[1], "!fake-helper");
+        list = configList();
+        assert.equal(
+            list.filter((line) =>
+                line.includes("deplodash-credential-helper-run.mjs")
+            ).length,
+            1
+        );
+
+        // useHttpPath must not be forced: host-scoped stored credentials
+        // keep matching unrelated repository URLs.
         const useHttpPath = spawnSync(
             "git",
             [
@@ -138,7 +181,7 @@ void test("installs the helper ahead of existing GitHub helpers and replaces pri
             ],
             { env: isolatedEnv, encoding: "utf8" }
         );
-        assert.equal(useHttpPath.stdout.trim(), "true");
+        assert.equal(useHttpPath.status, 1);
     } finally {
         server.close();
         await rm(temp, { recursive: true, force: true });

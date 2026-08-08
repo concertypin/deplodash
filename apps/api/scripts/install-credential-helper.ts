@@ -150,26 +150,17 @@ async function main(): Promise<void> {
     } finally {
         await rm(temporaryRunnerPath, { force: true });
     }
-    runGit([
-        "config",
-        "--global",
-        "credential.https://github.com.useHttpPath",
-        "true",
-    ]);
     const helperKey = "credential.https://github.com.helper";
-    // Preserve existing GitHub-scoped helpers as a fallback, but move the
-    // Deplodash runner ahead of them so it is consulted first, and drop any
-    // prior Deplodash entries so reinstalling (e.g. rotating the token) does
-    // not stack duplicate helpers that each fire a /api/token request.
-    const previousResult = runGitCapture([
-        "config",
-        "--global",
-        "--get-all",
-        helperKey,
-    ]);
-    const retainedHelpers =
-        previousResult.status === 0
-            ? previousResult.stdout
+    const genericHelperKey = "credential.helper";
+    // Preserve existing GitHub-scoped AND generic credential providers
+    // (GCM, keychain) as fallback, but move the Deplodash runner ahead of all
+    // of them so it is consulted first for github.com. Drop any prior
+    // Deplodash entries so reinstalling (e.g. rotating the token) does not
+    // stack duplicate helpers that each fire a /api/token request.
+    const collectHelpers = (key: string): string[] => {
+        const result = runGitCapture(["config", "--global", "--get-all", key]);
+        return result.status === 0
+            ? result.stdout
                   .split(/\r?\n/)
                   .map((line) => line.trim())
                   .filter(
@@ -178,18 +169,25 @@ async function main(): Promise<void> {
                           !line.includes("deplodash-credential-helper")
                   )
             : [];
-    const unsetResult = runGitCapture([
-        "config",
-        "--global",
-        "--unset-all",
-        helperKey,
-    ]);
-    // exit 5 means the key had no values — that is fine.
-    if (unsetResult.status !== 0 && unsetResult.status !== 5) {
-        throw new Error(
-            `git config failed with exit code ${String(unsetResult.status)}`
-        );
-    }
+    };
+    const retainedHelpers = collectHelpers(helperKey);
+    const retainedGenericHelpers = collectHelpers(genericHelperKey);
+    const unsetAll = (key: string): void => {
+        const result = runGitCapture([
+            "config",
+            "--global",
+            "--unset-all",
+            key,
+        ]);
+        // exit 5 means the key had no values — that is fine.
+        if (result.status !== 0 && result.status !== 5) {
+            throw new Error(
+                `git config failed with exit code ${String(result.status)}`
+            );
+        }
+    };
+    unsetAll(helperKey);
+    unsetAll(genericHelperKey);
     const configuredRunnerPath = runnerPath.replaceAll("\\", "/");
     runGit([
         "config",
@@ -200,6 +198,9 @@ async function main(): Promise<void> {
     ]);
     for (const entry of retainedHelpers) {
         runGit(["config", "--global", "--add", helperKey, entry]);
+    }
+    for (const entry of retainedGenericHelpers) {
+        runGit(["config", "--global", "--add", genericHelperKey, entry]);
     }
     process.stdout.write(
         "Installed Deplodash credential helper for HTTPS GitHub remotes.\n"
