@@ -52,6 +52,40 @@ const COMPOUND_SCOPE_PRESETS: Record<string, string[]> = {
     ],
 };
 
+// Granular scopes the API accepts, mirrored from the Scope union in
+// apps/api/src/github/scopes.ts. Overrides containing anything else would
+// never be approvable on the consent page, so reject them up front.
+const VALID_SCOPES: Record<string, true> = {
+    "contents:read": true,
+    "contents:write": true,
+    "issues:read": true,
+    "issues:write": true,
+    "pulls:read": true,
+    "pulls:write": true,
+    "actions:read": true,
+    "actions:write": true,
+    "metadata:read": true,
+    "deployments:read": true,
+    "deployments:write": true,
+    "administration:read": true,
+    "administration:write": true,
+    "members:read": true,
+    "members:write": true,
+    "secrets:read": true,
+    "secrets:write": true,
+    "pages:read": true,
+    "pages:write": true,
+    "webhooks:read": true,
+    "webhooks:write": true,
+    "environments:read": true,
+    "environments:write": true,
+    "variables:read": true,
+    "variables:write": true,
+    "workflows:write": true,
+    "checks:read": true,
+    "checks:write": true,
+};
+
 function expandConfiguredScopes(scopes: string[]): string[] {
     const result = new Set<string>();
     for (const scope of scopes) {
@@ -176,11 +210,21 @@ async function handleCredentialRequest(
     if (!agentToken) return ignored();
 
     const configuredScopes = env.DEPLODASH_SCOPES;
-    if (
-        configuredScopes !== undefined &&
-        parseScopes(configuredScopes)?.length === 0
-    ) {
-        return failure("DEPLODASH_SCOPES must contain at least one scope");
+    if (configuredScopes !== undefined) {
+        const parsedScopes = parseScopes(configuredScopes);
+        if (parsedScopes?.length === 0) {
+            return failure("DEPLODASH_SCOPES must contain at least one scope");
+        }
+        if (parsedScopes) {
+            const invalidScopes = expandConfiguredScopes(parsedScopes).filter(
+                (scope) => !VALID_SCOPES[scope]
+            );
+            if (invalidScopes.length > 0) {
+                return failure(
+                    `DEPLODASH_SCOPES contains unsupported scopes: ${invalidScopes.join(", ")}`
+                );
+            }
+        }
     }
 
     const configuredRepoMode = env.DEPLODASH_REPO_MODE?.trim();

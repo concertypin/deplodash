@@ -126,50 +126,64 @@ function delay(milliseconds: number): Promise<void> {
 
     const route = `POST /api/token\n{ "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" }\nAuthorization: Bearer <agent-token>`;
 
+    let revokingGroupKey = $state<string | null>(null);
+
+    function consentGroupKey(group: ConsentGroup): string {
+        return `${group.repo.trim().toLowerCase()}|${group.agent_id ?? ""}`;
+    }
+
     async function revokeConsentGroup(group: ConsentGroup) {
-        // The revoke endpoint shares the 10-per-10-second per-IP limiter with
-        // consent and auth handlers, so pace every request instead of
-        // assuming an empty bucket.
-        const results = await Promise.allSettled(
-            group.items.map(async (item, index) => {
-                if (index > 0) await delay(index * 1200);
-                return client.api.consent.revoke.$post({
-                    json: {
-                        repo: item.repo,
-                        scopes: item.scopes,
-                        agent_id: item.agent_id,
-                    },
-                });
-            })
-        );
-        if (
-            results.every(
-                (result) => result.status === "fulfilled" && result.value.ok
-            )
-        ) {
-            window.location.reload();
-            return;
-        }
-        const succeededKeys = new SvelteSet<string>();
-        let ownershipError = false;
-        results.forEach((result, index) => {
-            const item = group.items[index];
-            if (!item) return;
-            if (result.status === "fulfilled" && result.value.ok) {
-                succeededKeys.add(consentMemberKey(item));
-            } else if (
-                result.status === "fulfilled" &&
-                result.value.status === 403
+        const groupKey = consentGroupKey(group);
+        if (revokingGroupKey !== null) return;
+        revokingGroupKey = groupKey;
+        try {
+            // The revoke endpoint shares the 10-per-10-second per-IP limiter
+            // with consent and auth handlers, so pace every request instead
+            // of assuming an empty bucket.
+            const results = await Promise.allSettled(
+                group.items.map(async (item, index) => {
+                    if (index > 0) await delay(index * 1200);
+                    return client.api.consent.revoke.$post({
+                        json: {
+                            repo: item.repo,
+                            scopes: item.scopes,
+                            agent_id: item.agent_id,
+                        },
+                    });
+                })
+            );
+            if (
+                results.every(
+                    (result) =>
+                        result.status === "fulfilled" && result.value.ok
+                )
             ) {
-                ownershipError = true;
+                window.location.reload();
+                return;
             }
-        });
-        consentItems = consentItems.filter(
-            (item) => !succeededKeys.has(consentMemberKey(item))
-        );
-        error = ownershipError
-            ? "You cannot revoke this consent"
-            : "Failed to revoke consent";
+            const succeededKeys = new SvelteSet<string>();
+            let ownershipError = false;
+            results.forEach((result, index) => {
+                const item = group.items[index];
+                if (!item) return;
+                if (result.status === "fulfilled" && result.value.ok) {
+                    succeededKeys.add(consentMemberKey(item));
+                } else if (
+                    result.status === "fulfilled" &&
+                    result.value.status === 403
+                ) {
+                    ownershipError = true;
+                }
+            });
+            consentItems = consentItems.filter(
+                (item) => !succeededKeys.has(consentMemberKey(item))
+            );
+            error = ownershipError
+                ? "You cannot revoke this consent"
+                : "Failed to revoke consent";
+        } finally {
+            revokingGroupKey = null;
+        }
     }
 
     // ─── Agent token management state ─────────────────────────────────────────
@@ -609,7 +623,9 @@ function delay(milliseconds: number): Promise<void> {
                                                             group
                                                         )}
                                                     aria-label={`Revoke access to ${group.repo}`}
-                                                    class="text-error hover:text-error/80 transition-colors"
+                                                    disabled={revokingGroupKey ===
+                                                        consentGroupKey(group)}
+                                                    class="text-error hover:text-error/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     Revoke
                                                 </button>

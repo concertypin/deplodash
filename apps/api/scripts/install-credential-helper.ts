@@ -30,6 +30,14 @@ function runGit(args: string[]): void {
         );
 }
 
+function runGitCapture(args: string[]): {
+    status: number | null;
+    stdout: string;
+} {
+    const result = spawnSync("git", args, { encoding: "utf8" });
+    return { status: result.status, stdout: String(result.stdout ?? "") };
+}
+
 function shellQuote(value: string): string {
     return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -142,21 +150,57 @@ async function main(): Promise<void> {
     } finally {
         await rm(temporaryRunnerPath, { force: true });
     }
-
     runGit([
         "config",
         "--global",
         "credential.https://github.com.useHttpPath",
         "true",
     ]);
+    const helperKey = "credential.https://github.com.helper";
+    // Preserve existing GitHub-scoped helpers as a fallback, but move the
+    // Deplodash runner ahead of them so it is consulted first, and drop any
+    // prior Deplodash entries so reinstalling (e.g. rotating the token) does
+    // not stack duplicate helpers that each fire a /api/token request.
+    const previousResult = runGitCapture([
+        "config",
+        "--global",
+        "--get-all",
+        helperKey,
+    ]);
+    const retainedHelpers =
+        previousResult.status === 0
+            ? previousResult.stdout
+                  .split(/\r?\n/)
+                  .map((line) => line.trim())
+                  .filter(
+                      (line) =>
+                          line.length > 0 &&
+                          !line.includes("deplodash-credential-helper")
+                  )
+            : [];
+    const unsetResult = runGitCapture([
+        "config",
+        "--global",
+        "--unset-all",
+        helperKey,
+    ]);
+    // exit 5 means the key had no values — that is fine.
+    if (unsetResult.status !== 0 && unsetResult.status !== 5) {
+        throw new Error(
+            `git config failed with exit code ${String(unsetResult.status)}`
+        );
+    }
     const configuredRunnerPath = runnerPath.replaceAll("\\", "/");
     runGit([
         "config",
         "--global",
         "--add",
-        "credential.https://github.com.helper",
+        helperKey,
         `!node ${shellQuote(configuredRunnerPath)}`,
     ]);
+    for (const entry of retainedHelpers) {
+        runGit(["config", "--global", "--add", helperKey, entry]);
+    }
     process.stdout.write(
         "Installed Deplodash credential helper for HTTPS GitHub remotes.\n"
     );

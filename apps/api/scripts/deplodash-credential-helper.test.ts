@@ -337,6 +337,17 @@ void test("rejects an invalid DEPLODASH_REPO_MODE without leaking secrets", asyn
     assert.equal(result.stderr.includes("DEPLODASH_REPO_MODE"), true);
 });
 
+void test("rejects unsupported DEPLODASH_SCOPES values before requesting consent", async () => {
+    const result = await getResult(
+        async () => response(200, { token: "ghs_test" }),
+        () => ({ success: true, stdout: "" }),
+        { DEPLODASH_SCOPES: "contents:read,delete-everything" }
+    );
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.includes("unsupported scopes"), true);
+    assert.equal(result.stderr.includes("delete-everything"), true);
+});
+
 void test("works through git credential fill with an isolated helper configuration", async () => {
     const requests: Array<{ repo: string; scopes: string[] }> = [];
     const server = createServer((request, res) => {

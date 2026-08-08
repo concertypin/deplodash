@@ -599,4 +599,45 @@ describe("HomePage", () => {
             )
             .not.toBeInTheDocument();
     });
+
+    it("disables the group revoke control while the paced batch is pending", async () => {
+        const consents = [
+            {
+                repo: "owner/repo",
+                scopes: "contents:write, contents:read",
+                granted_at: "2026-07-20T00:00:00Z",
+                agent_id: "agent-a",
+            },
+            {
+                repo: "owner/repo",
+                scopes: "workflows:write",
+                granted_at: "2026-07-21T00:00:00Z",
+                agent_id: "agent-a",
+            },
+        ];
+        // One member fails so the handler settles without reloading.
+        const revokeCalls = mockDashboardFetch(consents, (body) => {
+            if (body.scopes === "workflows:write") {
+                return mockFetchOnce(
+                    { error: "Cannot revoke another user's consent" },
+                    403
+                );
+            }
+            return mockFetchOnce({ status: "ok" });
+        });
+
+        const screen = await render(HomePage);
+
+        const revokeControl = screen.getByRole("button", {
+            name: "Revoke access to owner/repo",
+        });
+        await expect.poll(() => revokeControl.elements().length).toBe(1);
+        await revokeControl.click();
+
+        // While the paced batch is pending, the control is disabled so a
+        // second click cannot schedule another batch against the rate limit.
+        await expect.element(revokeControl).toBeDisabled();
+        await expect.poll(() => revokeCalls.length).toBe(2);
+        await expect.element(revokeControl).toBeEnabled();
+    });
 });
