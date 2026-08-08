@@ -1,3 +1,5 @@
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/concertypin/deplodash)
+
 # 🤖 Deplodash — GitHub App Token Service
 
 Issue scoped GitHub Installation Tokens to AI agents for git push and API access.
@@ -89,6 +91,16 @@ sequenceDiagram
 ```
 
 Available scopes: `contents:read`, `contents:write`, `workflows:write`, `admin`
+
+## Git Credential Helper
+
+For HTTPS `git push`, install the Node 24 credential helper with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh
+```
+
+The installer prompts for your agent token, stores it in a private runner under `~/.local/share/deplodash`, and registers the helper for GitHub HTTPS ahead of your existing credential providers (GCM, keychain), which remain usable as fallback. It does not put the token in Git configuration and does not force `credential.useHttpPath`, so host-scoped stored credentials keep matching. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set, and `DEPLODASH_REPO_MODE=create-if-missing` to opt in to automatic repository creation. When the helper cannot produce a token (for example consent is pending, or the repository is not managed by Deplodash) it prints a diagnostic to stderr and returns nothing, so Git falls through to your other credential providers instead of stopping. Approve the consent URL printed to stderr, then retry `git push`. Note that Git's approve phase forwards the issued token to every configured helper, so a persistent provider may cache the short-lived installation token; Deplodash is always consulted first and issues a fresh token per push, so the cached value is only used when Deplodash is unreachable. On Windows (no POSIX `/dev/tty`), set `$env:DEPLODASH_AGENT_TOKEN` before running the installer to avoid a visible-input prompt.
 
 ## OAuth Setup
 

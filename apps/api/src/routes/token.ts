@@ -53,6 +53,7 @@ const tokenResponseSchema = z.object({
     token: z.string(),
     expires_at: z.string(),
     effective_scopes: z.array(z.string()).optional(),
+    consent_url: z.string().optional(),
 });
 
 const needsConsentResponseSchema = z.object({
@@ -191,6 +192,19 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 );
             }
 
+            // Partial consent is intentional (the consent page supports
+            // granular selection): still issue a narrowed token, but surface
+            // a consent URL for the missing scopes so clients that require
+            // the full request (e.g. the git credential helper) can forward
+            // it instead of looping.
+            const missingScopes = scopes.filter(
+                (scope) => !effectiveScopes.includes(scope)
+            );
+            const consentUrlForMissing =
+                missingScopes.length > 0
+                    ? `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`
+                    : undefined;
+
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
             const cached = await tokenService.getCachedToken(
@@ -204,6 +218,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     token: cached.token,
                     expires_at: cached.expires_at,
                     effective_scopes: effectiveScopes,
+                    consent_url: consentUrlForMissing,
                 });
             }
 
@@ -268,6 +283,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 token: tokenResult.token,
                 expires_at: tokenResult.expires_at,
                 effective_scopes: effectiveScopes,
+                consent_url: consentUrlForMissing,
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -342,7 +358,9 @@ tokenRouter.on(
         }
         const tokenService = new TokenService(c.env.KV);
 
-        // First check if consent is already granted
+        // First check if consent is already granted for ALL requested scopes.
+        // A partial approval still needs consent for the missing scopes
+        // before token issuance.
         const effectiveScopes = await tokenService.findConsentScopes(
             agentId,
             repo,

@@ -101,18 +101,16 @@ Uses the session cookie created by the login flow and returns the user OAuth tok
 
 ## Git Credential Helper
 
-### HTTPS with credential helper (persistent)
+### HTTPS credential helper for git push
+
+Install the Node 24 helper and configure Git in one command:
 
 ```sh
-# Set remote to HTTPS (not SSH)
-git remote set-url origin https://github.com/owner/repo.git
-
-# Configure credential helper to fetch tokens from deplodash
-git config credential.helper "!f() {
-  echo username=x-access-token
-  echo password=$(curl -s -X POST {{BASE}}/api/token     -H 'Authorization: Bearer YOUR_AGENT_TOKEN'     -H 'Content-Type: application/json'     -d '{\"repo\":\"owner/repo\",\"scopes\":[\"contents:write\"]}'     | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-}; f"
+curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh
 ```
+
+The installer prompts for the long-lived agent token, stores it in a private runner under `~/.local/share/deplodash` rather than Git configuration, and registers the helper for GitHub HTTPS ahead of your existing credential providers (GCM, keychain), which remain usable as fallback. It does not force `credential.useHttpPath`, so host-scoped stored credentials keep matching. Use an HTTPS GitHub remote such as `https://github.com/owner/repo.git`. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set, and `DEPLODASH_REPO_MODE=create-if-missing` to opt in to automatic repository creation. When the helper cannot produce a token it prints a diagnostic (including the consent URL when approval is pending) to stderr and returns nothing, so Git falls through to other credential providers; approve the consent URL, then retry `git push`. Note that Git's approve phase forwards the issued token to every configured helper, so a persistent provider may cache the short-lived installation token; Deplodash is always consulted first and issues a fresh token per push.
+On Windows (no POSIX `/dev/tty`), set `DEPLODASH_AGENT_TOKEN` before running the installer to avoid a visible-input prompt.
 
 ## Permissions
 

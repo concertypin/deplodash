@@ -1,7 +1,7 @@
 <script lang="ts">
+    import { SvelteMap, SvelteSet } from "svelte/reactivity";
     import { GithubLogoIcon } from "phosphor-svelte";
     import { client } from "@/lib/api";
-
     interface ConsentItem {
         repo: string;
         scopes: string;
@@ -9,6 +9,80 @@
         granted_by?: string | undefined;
         agent_id?: string | undefined;
     }
+    interface ConsentGroup {
+        repo: string;
+        agent_id?: string | undefined;
+        scopes: string[];
+        granted_at: string;
+        items: ConsentItem[];
+    }
+
+    function consentMemberKey(item: ConsentItem): string {
+        const scopes = item.scopes
+            .split(",")
+            .map((scope) => scope.trim())
+            .filter(Boolean)
+            .sort()
+            .join(",");
+        return `${item.repo.trim().toLowerCase()}|${item.agent_id ?? ""}|${scopes}`;
+    }
+
+    function groupConsents(items: ConsentItem[]): ConsentGroup[] {
+        const groups = new SvelteMap<string, ConsentGroup>();
+        for (const item of items) {
+            const key = `${item.repo.trim().toLowerCase()}|${item.agent_id ?? ""}`;
+            let group = groups.get(key);
+            if (!group) {
+                group = {
+                    repo: item.repo,
+                    agent_id: item.agent_id,
+                    scopes: [],
+                    granted_at: item.granted_at,
+                    items: [],
+                };
+                groups.set(key, group);
+            }
+
+            const memberKey = consentMemberKey(item);
+            if (
+                group.items.some(
+                    (existing) => consentMemberKey(existing) === memberKey
+                )
+            ) {
+                if (item.granted_at > group.granted_at) {
+                    group.granted_at = item.granted_at;
+                }
+                continue;
+            }
+
+            if (item.granted_at > group.granted_at) {
+                group.granted_at = item.granted_at;
+            }
+            for (const scope of item.scopes
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)) {
+                if (!group.scopes.includes(scope)) {
+                    group.scopes.push(scope);
+                }
+            }
+            group.items.push(item);
+        }
+        return [...groups.values()].sort(
+            (a, b) =>
+                a.granted_at < b.granted_at
+                    ? 1
+                    : a.granted_at > b.granted_at
+                      ? -1
+                      : 0
+        );
+    }
+
+function delay(milliseconds: number): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, milliseconds);
+    return promise;
+}
 
     interface AgentToken {
         token: string;
@@ -25,7 +99,6 @@
 
     interface DashboardData {
         user: UserProfile;
-        consents: ConsentItem[];
         agentTokens: AgentToken[];
     }
     async function load(): Promise<
@@ -36,7 +109,7 @@
 
         const user: UserProfile = await meRes.json();
         const consentsRes = await client.api.user.consents.$get();
-        const consents: ConsentItem[] = consentsRes.ok
+        consentItems = consentsRes.ok
             ? (await consentsRes.json()).consents
             : [];
 
@@ -45,27 +118,71 @@
             ? (await agentTokensRes.json()).tokens
             : [];
 
-        return { kind: "dashboard", data: { user, consents, agentTokens } };
+        return { kind: "dashboard", data: { user, agentTokens } };
     }
+    let consentItems = $state<ConsentItem[]>([]);
+    const consentGroups = $derived(groupConsents(consentItems));
     let error = $state<string | null>(null);
 
     const route = `POST /api/token\n{ "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" }\nAuthorization: Bearer <agent-token>`;
 
-    async function revokeConsent(item: ConsentItem) {
+    let revokingGroupKey = $state<string | null>(null);
+
+    function consentGroupKey(group: ConsentGroup): string {
+        return `${group.repo.trim().toLowerCase()}|${group.agent_id ?? ""}`;
+    }
+
+    async function revokeConsentGroup(group: ConsentGroup) {
+        const groupKey = consentGroupKey(group);
+        if (revokingGroupKey !== null) return;
+        revokingGroupKey = groupKey;
         try {
-            const res = await client.api.consent.revoke.$post({
-                json: {
-                    repo: item.repo,
-                    scopes: item.scopes,
-                    agent_id: item.agent_id,
-                },
-            });
-            if (res.ok) {
-                // Trigger a re-fetch by navigating in place
+            // The revoke endpoint shares the 10-per-10-second per-IP limiter
+            // with consent and auth handlers, so pace every request instead
+            // of assuming an empty bucket.
+            const results = await Promise.allSettled(
+                group.items.map(async (item, index) => {
+                    if (index > 0) await delay(index * 1200);
+                    return client.api.consent.revoke.$post({
+                        json: {
+                            repo: item.repo,
+                            scopes: item.scopes,
+                            agent_id: item.agent_id,
+                        },
+                    });
+                })
+            );
+            if (
+                results.every(
+                    (result) =>
+                        result.status === "fulfilled" && result.value.ok
+                )
+            ) {
                 window.location.reload();
+                return;
             }
-        } catch (e) {
-            error = e instanceof Error ? e.message : "Failed to revoke";
+            const succeededKeys = new SvelteSet<string>();
+            let ownershipError = false;
+            results.forEach((result, index) => {
+                const item = group.items[index];
+                if (!item) return;
+                if (result.status === "fulfilled" && result.value.ok) {
+                    succeededKeys.add(consentMemberKey(item));
+                } else if (
+                    result.status === "fulfilled" &&
+                    result.value.status === 403
+                ) {
+                    ownershipError = true;
+                }
+            });
+            consentItems = consentItems.filter(
+                (item) => !succeededKeys.has(consentMemberKey(item))
+            );
+            error = ownershipError
+                ? "You cannot revoke this consent"
+                : "Failed to revoke consent";
+        } finally {
+            revokingGroupKey = null;
         }
     }
 
@@ -188,7 +305,7 @@
             </div>
         </div>
     {:else if result.kind === "dashboard"}
-        {@const { user, consents, agentTokens } = result.data}
+        {@const { user, agentTokens } = result.data}
         <div class="min-h-screen bg-base-200">
             <!-- Navbar -->
             <nav
@@ -466,7 +583,7 @@
                         </button>
                     </div>
 
-                    {#if consents.length === 0}
+                    {#if consentGroups.length === 0}
                         <div class="text-center py-8 text-base-content/60">
                             <p class="text-lg mb-2">
                                 No repositories authorized yet
@@ -488,22 +605,27 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {#each consents as item (item.repo + "|" + (item.agent_id ?? "") + "|" + item.granted_at)}
+                                    {#each consentGroups as group (group.repo.trim().toLowerCase() + "|" + (group.agent_id ?? ""))}
                                         <tr>
                                             <td class="font-medium"
-                                                >{item.repo}</td
+                                                >{group.repo}</td
                                             >
-                                            <td>{item.scopes}</td>
+                                            <td>{group.scopes.join(", ")}</td>
                                             <td>
                                                 {new Date(
-                                                    item.granted_at
+                                                    group.granted_at
                                                 ).toLocaleDateString()}
                                             </td>
                                             <td class="text-right">
                                                 <button
                                                     onclick={() =>
-                                                        revokeConsent(item)}
-                                                    class="text-error hover:text-error/80 transition-colors"
+                                                        revokeConsentGroup(
+                                                            group
+                                                        )}
+                                                    aria-label={`Revoke access to ${group.repo}`}
+                                                    disabled={revokingGroupKey ===
+                                                        consentGroupKey(group)}
+                                                    class="text-error hover:text-error/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     Revoke
                                                 </button>

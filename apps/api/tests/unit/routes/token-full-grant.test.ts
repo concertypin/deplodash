@@ -125,6 +125,64 @@ describe("POST /api/token — Full grant flow", () => {
         expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("issues a narrowed token with a consent URL when consent covers only a subset", async () => {
+        // Partial approval is a deliberate consent-page choice: the API must
+        // keep issuing a token for the approved subset, while surfacing a
+        // consent URL for the missing scopes so full-scope clients (like the
+        // git credential helper) can forward it instead of looping.
+        const tokenService = new TokenService(env.KV);
+        await tokenService.recordConsent("test-agent", "owner/repo", [
+            "contents:read",
+        ]);
+        mockFetch
+            .mockResolvedValueOnce(
+                jsonResponse({ id: 12345, account: { login: "owner" } })
+            )
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "admin_token_123",
+                    expires_at: "2026-12-31T23:59:59Z",
+                    permissions: { administration: "write" },
+                    repository_selection: "selected",
+                })
+            )
+            .mockResolvedValueOnce(jsonResponse({ name: "repo" }))
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    token: "ghs_scoped_token_456",
+                    expires_at: "2027-01-01T00:00:00Z",
+                    permissions: { contents: "read" },
+                    repository_selection: "selected",
+                })
+            );
+        const client = testClient(app, makeEnv(pkcs8Pem));
+        const resp = await client.api.token.$post(
+            {
+                json: {
+                    repo: "owner/repo",
+                    scopes: ["contents:read", "workflows:write"],
+                    repo_mode: "existing-only",
+                },
+            },
+            { headers: { Authorization: "Bearer flow-agent-token" } }
+        );
+        expect(resp.status).toBe(200);
+        const body = z
+            .object({
+                status: z.literal("ok"),
+                token: z.string(),
+                effective_scopes: z.array(z.string()),
+                consent_url: z.string(),
+            })
+            .parse(await resp.json());
+        expect(body.effective_scopes).toEqual(["contents:read"]);
+        const url = new URL(body.consent_url);
+        expect(url.searchParams.get("repo")).toBe("owner/repo");
+        expect(url.searchParams.get("scopes")).toBe(
+            "contents:read,workflows:write"
+        );
+    });
+
     it("returns a fresh consent URL when creation consent must be upgraded", async () => {
         // Stored consent is existing-only; the agent later requests the same
         // scopes with create-if-missing. The repo does not exist, so the

@@ -28,6 +28,10 @@ describe("GET /llms.txt", () => {
         expect(text).toContain("/api/token");
         expect(text).toContain("/api/user/token");
         expect(text).toContain("effective_scopes");
+        expect(text).toContain("install-credential-helper.sh");
+        expect(text).toContain("~/.local/share/deplodash");
+        expect(text).toContain("credential.useHttpPath");
+        expect(text).toContain("which remain usable as fallback");
         expect(resp.headers.get("Content-Type")).toContain("text/markdown");
     });
 });
