@@ -149,13 +149,6 @@ async function main(): Promise<void> {
         "credential.https://github.com.useHttpPath",
         "true",
     ]);
-    runGit([
-        "config",
-        "--global",
-        "--replace-all",
-        "credential.https://github.com.helper",
-        "",
-    ]);
     const configuredRunnerPath = runnerPath.replaceAll("\\", "/");
     runGit([
         "config",

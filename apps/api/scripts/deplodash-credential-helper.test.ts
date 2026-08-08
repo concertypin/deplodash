@@ -133,6 +133,51 @@ void test("requests workflow permission conservatively when no override is set",
     assert.equal(runner.calls.length, 0);
 });
 
+void test("expands compound DEPLODASH_SCOPES presets before request and comparison", async () => {
+    const result = await getResult(
+        async (_url, init) => {
+            assert.deepEqual(await new Request(_url, init).json(), {
+                repo: "owner/repo",
+                scopes: [
+                    "metadata:read",
+                    "contents:write",
+                    "workflows:write",
+                    "administration:write",
+                ],
+            });
+            return response(200, {
+                token: "ghs_test",
+                effective_scopes: [
+                    "metadata:read",
+                    "contents:write",
+                    "workflows:write",
+                    "administration:write",
+                ],
+            });
+        },
+        () => ({ success: true, stdout: "" }),
+        { DEPLODASH_SCOPES: "admin" }
+    );
+    assert.equal(result.stdout.includes("ghs_test"), true);
+});
+
+void test("surfaces the consent URL from a narrowed 200 response", async () => {
+    const result = await getResult(
+        async () =>
+            response(200, {
+                token: "ghs_test",
+                effective_scopes: ["contents:read"],
+                consent_url:
+                    "https://example.test/auth/consent?repo=owner%2Frepo&scopes=contents%3Awrite%2Cworkflows%3Awrite",
+            }),
+        () => ({ success: true, stdout: "" })
+    );
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.includes("consent required:"), true);
+    assert.equal(result.stderr.includes("example.test"), true);
+    assert.equal(result.stderr.includes("ghs_test"), false);
+});
+
 void test("rejects a token whose effective scopes are narrower than requested", async () => {
     const result = await getResult(
         async () =>

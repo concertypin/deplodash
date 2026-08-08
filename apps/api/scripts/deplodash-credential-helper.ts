@@ -22,6 +22,7 @@ type TokenResponse = {
     status?: unknown;
     token?: unknown;
     url?: unknown;
+    consent_url?: unknown;
     effective_scopes?: unknown;
 };
 
@@ -33,6 +34,33 @@ const REPOSITORY_MODES: Record<string, true> = {
     "existing-only": true,
     "create-if-missing": true,
 };
+
+// Mirror of the API's compound presets (apps/api/src/github/scopes.ts):
+// overrides must be expanded to granular scopes before both the request and
+// the effective-scope comparison.
+const COMPOUND_SCOPE_PRESETS: Record<string, string[]> = {
+    "contents:write+workflows:write": [
+        "metadata:read",
+        "contents:write",
+        "workflows:write",
+    ],
+    admin: [
+        "metadata:read",
+        "contents:write",
+        "workflows:write",
+        "administration:write",
+    ],
+};
+
+function expandConfiguredScopes(scopes: string[]): string[] {
+    const result = new Set<string>();
+    for (const scope of scopes) {
+        const preset = COMPOUND_SCOPE_PRESETS[scope];
+        const parts = preset ?? [scope];
+        for (const part of parts) result.add(part);
+    }
+    return [...result];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -112,7 +140,7 @@ async function resolveScopes(
     runGit: (args: string[]) => GitResult
 ): Promise<string[]> {
     const override = parseScopes(configuredScopes);
-    if (override !== null) return override;
+    if (override !== null) return expandConfiguredScopes(override);
 
     // Git does not pass the pushed ref to credential helpers. Request the
     // workflow permission conservatively unless the caller supplies an
@@ -207,11 +235,18 @@ async function handleCredentialRequest(
             // The API may return a token whose effective scopes are a subset
             // of the requested scopes (partial consent). Handing that token
             // to Git produces a confusing push-time 403, so fail fast with a
-            // consent directive instead.
+            // consent directive. When the API includes a consent URL for the
+            // missing scopes, surface it so the user can approve directly.
             const missingScopes = missingEffectiveScopes(scopes, payload);
             if (missingScopes.length > 0) {
+                const consentUrl =
+                    typeof payload.consent_url === "string"
+                        ? payload.consent_url
+                        : null;
                 return failure(
-                    `token scopes are narrower than requested (missing: ${missingScopes.join(", ")}); grant consent for these scopes and retry`
+                    consentUrl
+                        ? `consent required: ${consentUrl}`
+                        : `token scopes are narrower than requested (missing: ${missingScopes.join(", ")}); grant consent for these scopes and retry`
                 );
             }
             return {
