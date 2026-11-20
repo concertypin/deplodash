@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, parseRepo, isSafeRedirect } from "@/helpers";
+import {
+    buildConsentUrl,
+    escapeHtml,
+    parseRepo,
+    isSafeRedirect,
+} from "@/helpers";
 
 describe("escapeHtml", () => {
     it("escapes special chars", () => {
@@ -58,5 +63,22 @@ describe("isSafeRedirect", () => {
     it("rejects backslash-normalized protocol-relative URLs", () => {
         // /\/evil.com is normalized by browsers to //evil.com
         expect(isSafeRedirect("/\\/evil.com")).toBe(false);
+    });
+});
+
+describe("buildConsentUrl", () => {
+    it("encodes every consent parameter so the consent page can parse it back", () => {
+        const url = buildConsentUrl("https://deplodash.example", {
+            repo: "owner/repo",
+            agentId: "agent &id",
+            scopes: ["contents:write", "workflows:write"],
+            repoMode: "create-if-missing",
+        });
+        expect(url).toBe(
+            "https://deplodash.example/auth/consent?repo=owner%2Frepo&agent_id=agent%20%26id&scopes=contents%3Awrite%2Cworkflows%3Awrite&repo_mode=create-if-missing"
+        );
+        const params = new URL(url).searchParams;
+        expect(params.get("agent_id")).toBe("agent &id");
+        expect(params.get("scopes")).toBe("contents:write,workflows:write");
     });
 });

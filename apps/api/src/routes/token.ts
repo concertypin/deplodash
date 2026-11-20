@@ -20,6 +20,7 @@ import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { expandCompoundScopes } from "@/github/scopes";
+import { buildConsentUrl } from "@/helpers";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -176,12 +177,15 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     repo
                 );
 
-                const consentUrl = `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`;
-
                 return c.json(
                     {
                         status: "needs_consent",
-                        url: consentUrl,
+                        url: buildConsentUrl(baseUrl, {
+                            repo,
+                            agentId,
+                            scopes,
+                            repoMode: repo_mode,
+                        }),
                         requested_scopes: scopes,
                         approved_scopes:
                             approvedScopes.length > 0
@@ -194,16 +198,20 @@ export const tokenRouter = new Hono<HonoEnv>().post(
 
             // Partial consent is intentional (the consent page supports
             // granular selection): still issue a narrowed token, but surface
-            // a consent URL for the missing scopes so clients that require
-            // the full request (e.g. the git credential helper) can forward
-            // it instead of looping.
-            const missingScopes = scopes.filter(
+            // a consent URL re-requesting the full scope set so clients that
+            // require it (e.g. the git credential helper) can forward it
+            // instead of looping.
+            const hasMissingScopes = scopes.some(
                 (scope) => !effectiveScopes.includes(scope)
             );
-            const consentUrlForMissing =
-                missingScopes.length > 0
-                    ? `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`
-                    : undefined;
+            const consentUrlForMissing = hasMissingScopes
+                ? buildConsentUrl(baseUrl, {
+                      repo,
+                      agentId,
+                      scopes,
+                      repoMode: repo_mode,
+                  })
+                : undefined;
 
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
@@ -243,15 +251,15 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     // the stored consent only permits existing-only. Surface
                     // a fresh consent URL so the user can approve creation.
                     if (repo_mode === "create-if-missing") {
-                        const upgradeUrl =
-                            `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                            `&agent_id=${encodeURIComponent(agentId)}` +
-                            `&scopes=${encodeURIComponent(scopes.join(","))}` +
-                            `&repo_mode=${encodeURIComponent("create-if-missing")}`;
                         return c.json(
                             {
                                 status: "needs_consent",
-                                url: upgradeUrl,
+                                url: buildConsentUrl(baseUrl, {
+                                    repo,
+                                    agentId,
+                                    scopes,
+                                    repoMode: "create-if-missing",
+                                }),
                                 requested_scopes: scopes,
                                 approved_scopes: effectiveScopes,
                             },
@@ -358,9 +366,10 @@ tokenRouter.on(
         }
         const tokenService = new TokenService(c.env.KV);
 
-        // First check if consent is already granted for ALL requested scopes.
-        // A partial approval still needs consent for the missing scopes
-        // before token issuance.
+        // First check if consent is already granted. Any approved subset of
+        // the requested scopes counts (findConsentScopes returns the approved
+        // intersection); POST /api/token then issues a narrowed token and
+        // reports the missing scopes through `consent_url`.
         const effectiveScopes = await tokenService.findConsentScopes(
             agentId,
             repo,

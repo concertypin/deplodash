@@ -6,6 +6,7 @@
 
 import { ConsentService } from "@/token/consent-service";
 import { getCachedToken, cacheToken } from "@/token/cache";
+import { buildConsentUrl } from "@/helpers";
 import type { RepositoryMode } from "@/types";
 // ─── Result type ─────────────────────────────────────────────────────────────
 
@@ -178,7 +179,12 @@ export class TokenService {
             if (!foundScopes) {
                 return {
                     status: "needs_consent",
-                    url: `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(params.agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(params.repoMode ?? "existing-only")}`,
+                    url: buildConsentUrl(baseUrl, {
+                        repo,
+                        agentId: params.agentId,
+                        scopes,
+                        repoMode: params.repoMode ?? "existing-only",
+                    }),
                 };
             }
             effectiveScopes = foundScopes;

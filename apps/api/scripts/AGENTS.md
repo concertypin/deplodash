@@ -21,3 +21,11 @@ node scripts/agent-token-manager.ts revoke <token> [--local]
 
 The tool reads/writes KV keys with prefix `agent_tokens:`.
 Requires Node 24+ (native TypeScript stripping, no `--experimental-strip-types` flag needed).
+
+## Git Credential Helper
+
+`deplodash-credential-helper.ts` is the Git credential helper end users run; `install-credential-helper.sh` / `.ts` install it (users fetch them from the `main` branch on raw.githubusercontent.com, so these files ship to users as-is).
+
+- The helper is downloaded as a standalone file and cannot import from `src/`. It carries its own copy of the scope tables; `deplodash-credential-helper.test.ts` fails when they drift from `src/github/scopes.ts`.
+- The installer rebuilds the global `credential.https://github.com` section: an empty-value reset, the Deplodash runner, then the previously effective helpers as fallbacks, plus `useHttpPath=true` (without it Git never sends the repository path to helpers).
+- Tests run under `node:test` via `pnpm run test:credential`, not the Workers Vitest pool.

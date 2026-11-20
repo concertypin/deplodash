@@ -600,7 +600,7 @@ describe("HomePage", () => {
             .not.toBeInTheDocument();
     });
 
-    it("disables the group revoke control while the paced batch is pending", async () => {
+    it("disables every revoke control while the paced batch is pending", async () => {
         const consents = [
             {
                 repo: "owner/repo",
@@ -612,6 +612,12 @@ describe("HomePage", () => {
                 repo: "owner/repo",
                 scopes: "workflows:write",
                 granted_at: "2026-07-21T00:00:00Z",
+                agent_id: "agent-a",
+            },
+            {
+                repo: "other/repo",
+                scopes: "contents:read",
+                granted_at: "2026-07-22T00:00:00Z",
                 agent_id: "agent-a",
             },
         ];
@@ -631,13 +637,19 @@ describe("HomePage", () => {
         const revokeControl = screen.getByRole("button", {
             name: "Revoke access to owner/repo",
         });
+        const otherRevokeControl = screen.getByRole("button", {
+            name: "Revoke access to other/repo",
+        });
         await expect.poll(() => revokeControl.elements().length).toBe(1);
         await revokeControl.click();
 
-        // While the paced batch is pending, the control is disabled so a
-        // second click cannot schedule another batch against the rate limit.
+        // While the paced batch is pending, every control is disabled: a
+        // second click can neither schedule another batch against the rate
+        // limit nor be silently ignored on a row that looks clickable.
         await expect.element(revokeControl).toBeDisabled();
+        await expect.element(otherRevokeControl).toBeDisabled();
         await expect.poll(() => revokeCalls.length).toBe(2);
         await expect.element(revokeControl).toBeEnabled();
+        await expect.element(otherRevokeControl).toBeEnabled();
     });
 });

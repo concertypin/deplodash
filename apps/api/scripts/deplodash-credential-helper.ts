@@ -1,15 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 type CredentialHelperResult = {
     stdout: string;
     stderr: string;
     exitCode: 0 | 1;
-};
-
-type GitResult = {
-    success: boolean;
-    stdout: string;
 };
 
 type CredentialInput = {
@@ -125,13 +119,11 @@ function parseRepository(path: string | undefined): string | null {
     return REPOSITORY_PATTERN.test(repository) ? repository : null;
 }
 
-function parseScopes(value: string | undefined): string[] | null {
-    if (value === undefined) return null;
-    const scopes = value
+function parseScopes(value: string): string[] {
+    return value
         .split(",")
         .map((scope) => scope.trim())
         .filter((scope) => scope.length > 0);
-    return scopes.length > 0 ? scopes : [];
 }
 
 function missingEffectiveScopes(
@@ -169,28 +161,11 @@ function redactedError(error: unknown): string {
         : "request failed";
 }
 
-async function resolveScopes(
-    configuredScopes: string | undefined,
-    runGit: (args: string[]) => GitResult
-): Promise<string[]> {
-    const override = parseScopes(configuredScopes);
-    if (override !== null) return expandConfiguredScopes(override);
-
-    // Git does not pass the pushed ref to credential helpers. Request the
-    // workflow permission conservatively unless the caller supplies an
-    // explicit scope override.
-    void runGit;
-    return ["contents:write", "workflows:write"];
-}
-
 async function handleCredentialRequest(
     action: string | undefined,
     input: string,
     env: Readonly<NodeJS.ProcessEnv>,
-    dependencies: {
-        fetch: typeof globalThis.fetch;
-        runGit: (args: string[]) => GitResult;
-    }
+    dependencies: { fetch: typeof globalThis.fetch }
 ): Promise<CredentialHelperResult> {
     if (action !== "get") return ignored();
 
@@ -209,21 +184,21 @@ async function handleCredentialRequest(
     const agentToken = env.DEPLODASH_AGENT_TOKEN?.trim();
     if (!agentToken) return ignored();
 
-    const configuredScopes = env.DEPLODASH_SCOPES;
-    if (configuredScopes !== undefined) {
-        const parsedScopes = parseScopes(configuredScopes);
-        if (parsedScopes?.length === 0) {
+    // Git does not pass the pushed ref to credential helpers. Request the
+    // workflow permission conservatively unless the caller supplies an
+    // explicit scope override.
+    let scopes = ["contents:write", "workflows:write"];
+    if (env.DEPLODASH_SCOPES !== undefined) {
+        const parsedScopes = parseScopes(env.DEPLODASH_SCOPES);
+        if (parsedScopes.length === 0) {
             return failure("DEPLODASH_SCOPES must contain at least one scope");
         }
-        if (parsedScopes) {
-            const invalidScopes = expandConfiguredScopes(parsedScopes).filter(
-                (scope) => !VALID_SCOPES[scope]
+        scopes = expandConfiguredScopes(parsedScopes);
+        const invalidScopes = scopes.filter((scope) => !VALID_SCOPES[scope]);
+        if (invalidScopes.length > 0) {
+            return failure(
+                `DEPLODASH_SCOPES contains unsupported scopes: ${invalidScopes.join(", ")}`
             );
-            if (invalidScopes.length > 0) {
-                return failure(
-                    `DEPLODASH_SCOPES contains unsupported scopes: ${invalidScopes.join(", ")}`
-                );
-            }
         }
     }
 
@@ -237,12 +212,6 @@ async function handleCredentialRequest(
     const baseUrl = (
         env.DEPLODASH_URL?.trim() || DEFAULT_DEPLODASH_URL
     ).replace(/\/+$/, "");
-    let scopes: string[];
-    try {
-        scopes = await resolveScopes(configuredScopes, dependencies.runGit);
-    } catch (error: unknown) {
-        return failure(`scope detection failed: ${redactedError(error)}`);
-    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -322,16 +291,7 @@ async function main(): Promise<void> {
         process.argv[2],
         input,
         process.env,
-        {
-            fetch: globalThis.fetch,
-            runGit: (args) => {
-                const gitProcess = spawnSync("git", args, { encoding: "utf8" });
-                return {
-                    success: gitProcess.status === 0,
-                    stdout: String(gitProcess.stdout ?? ""),
-                };
-            },
-        }
+        { fetch: globalThis.fetch }
     );
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
@@ -345,5 +305,5 @@ if (
     void main();
 }
 
-export type { CredentialHelperResult, GitResult };
-export { handleCredentialRequest };
+export type { CredentialHelperResult };
+export { COMPOUND_SCOPE_PRESETS, VALID_SCOPES, handleCredentialRequest };

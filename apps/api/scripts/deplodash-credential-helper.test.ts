@@ -4,10 +4,18 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { handleCredentialRequest } from "./deplodash-credential-helper.ts";
-
-type Call = { args: string[] };
+import {
+    COMPOUND_SCOPES,
+    SCOPE_TO_GITHUB,
+    expandCompoundScopes,
+} from "../src/github/scopes.ts";
+import {
+    COMPOUND_SCOPE_PRESETS,
+    VALID_SCOPES,
+    handleCredentialRequest,
+} from "./deplodash-credential-helper.ts";
 
 const input = "protocol=https\nhost=github.com\npath=/owner/repo.git\n\n";
 const env = {
@@ -45,47 +53,49 @@ async function runProcess(
     return promise;
 }
 
-function gitRunner(results: Array<{ success: boolean; stdout: string }>): {
-    calls: Call[];
-    runGit: (args: string[]) => { success: boolean; stdout: string };
-} {
-    const calls: Call[] = [];
-    return {
-        calls,
-        runGit: (args) => {
-            calls.push({ args });
-            return results.shift() ?? { success: false, stdout: "" };
-        },
-    };
-}
-
 async function getResult(
     fetch: typeof globalThis.fetch,
-    runGit: (args: string[]) => { success: boolean; stdout: string },
     overrides: Partial<NodeJS.ProcessEnv> = {}
 ) {
     return handleCredentialRequest(
         "get",
         input,
         { ...env, ...overrides },
-        { fetch, runGit }
+        { fetch }
     );
 }
 
 const SUCCESS_SCOPES = ["contents:write", "workflows:write"];
 
+// The helper is downloaded as a standalone file, so it carries its own copy
+// of the API scope tables. Keep the copies in lockstep with the source.
+void test("mirrors the API's granular scopes and compound presets", () => {
+    assert.deepEqual(
+        Object.keys(VALID_SCOPES).sort(),
+        Object.keys(SCOPE_TO_GITHUB).sort()
+    );
+    assert.deepEqual(
+        Object.keys(COMPOUND_SCOPE_PRESETS).sort(),
+        [...COMPOUND_SCOPES].sort()
+    );
+    for (const [preset, expansion] of Object.entries(COMPOUND_SCOPE_PRESETS)) {
+        assert.deepEqual(
+            [...expansion].sort(),
+            expandCompoundScopes([preset]).sort(),
+            `preset ${preset} drifted from apps/api/src/github/scopes.ts`
+        );
+    }
+});
+
 void test("returns credentials for a successful token request", async () => {
     let request: Request | undefined;
-    const result = await getResult(
-        async (url, init) => {
-            request = new Request(url, init);
-            return response(200, {
-                token: "ghs_test",
-                effective_scopes: SUCCESS_SCOPES,
-            });
-        },
-        () => ({ success: true, stdout: "" })
-    );
+    const result = await getResult(async (url, init) => {
+        request = new Request(url, init);
+        return response(200, {
+            token: "ghs_test",
+            effective_scopes: SUCCESS_SCOPES,
+        });
+    });
     assert.equal(
         result.stdout,
         "username=x-access-token\npassword=ghs_test\n\n"
@@ -99,26 +109,27 @@ void test("returns credentials for a successful token request", async () => {
     });
 });
 
-void test("scope override bypasses git probes", async () => {
-    const runner = gitRunner([]);
+void test("requests the trimmed, deduplicated DEPLODASH_SCOPES override", async () => {
     const result = await getResult(
-        async () =>
-            response(200, {
+        async (_url, init) => {
+            assert.deepEqual(await new Request(_url, init).json(), {
+                repo: "owner/repo",
+                scopes: ["contents:read", "workflows:write"],
+            });
+            return response(200, {
                 token: "ghs_test",
                 effective_scopes: ["contents:read", "workflows:write"],
-            }),
-        runner.runGit,
+            });
+        },
         { DEPLODASH_SCOPES: " contents:read, workflows:write,contents:read " }
     );
     assert.equal(
         result.stdout,
         "username=x-access-token\npassword=ghs_test\n\n"
     );
-    assert.equal(runner.calls.length, 0);
 });
 
 void test("requests workflow permission conservatively when no override is set", async () => {
-    const runner = gitRunner([]);
     const result = await getResult(async (_url, init) => {
         assert.deepEqual(await new Request(_url, init).json(), {
             repo: "owner/repo",
@@ -128,9 +139,8 @@ void test("requests workflow permission conservatively when no override is set",
             token: "ghs_test",
             effective_scopes: SUCCESS_SCOPES,
         });
-    }, runner.runGit);
+    });
     assert.equal(result.stdout.includes("ghs_test"), true);
-    assert.equal(runner.calls.length, 0);
 });
 
 void test("expands compound DEPLODASH_SCOPES presets before request and comparison", async () => {
@@ -155,22 +165,19 @@ void test("expands compound DEPLODASH_SCOPES presets before request and comparis
                 ],
             });
         },
-        () => ({ success: true, stdout: "" }),
         { DEPLODASH_SCOPES: "admin" }
     );
     assert.equal(result.stdout.includes("ghs_test"), true);
 });
 
 void test("surfaces the consent URL from a narrowed 200 response", async () => {
-    const result = await getResult(
-        async () =>
-            response(200, {
-                token: "ghs_test",
-                effective_scopes: ["contents:read"],
-                consent_url:
-                    "https://example.test/auth/consent?repo=owner%2Frepo&scopes=contents%3Awrite%2Cworkflows%3Awrite",
-            }),
-        () => ({ success: true, stdout: "" })
+    const result = await getResult(async () =>
+        response(200, {
+            token: "ghs_test",
+            effective_scopes: ["contents:read"],
+            consent_url:
+                "https://example.test/auth/consent?repo=owner%2Frepo&scopes=contents%3Awrite%2Cworkflows%3Awrite",
+        })
     );
     assert.equal(result.stdout, "");
     assert.equal(result.stderr.includes("consent required:"), true);
@@ -179,13 +186,11 @@ void test("surfaces the consent URL from a narrowed 200 response", async () => {
 });
 
 void test("rejects a token whose effective scopes are narrower than requested", async () => {
-    const result = await getResult(
-        async () =>
-            response(200, {
-                token: "ghs_test",
-                effective_scopes: ["contents:read"],
-            }),
-        () => ({ success: true, stdout: "" })
+    const result = await getResult(async () =>
+        response(200, {
+            token: "ghs_test",
+            effective_scopes: ["contents:read"],
+        })
     );
     assert.equal(result.stdout, "");
     assert.equal(result.stderr.includes("contents:write"), true);
@@ -209,7 +214,6 @@ void test("handles Git LFS paths and explicit default HTTPS port", async () => {
                     effective_scopes: SUCCESS_SCOPES,
                 });
             },
-            runGit: () => ({ success: true, stdout: "" }),
         }
     );
     assert.equal(
@@ -227,7 +231,6 @@ void test("handles Git LFS paths and explicit default HTTPS port", async () => {
                     token: "ghs_test",
                     effective_scopes: SUCCESS_SCOPES,
                 }),
-            runGit: () => ({ success: true, stdout: "" }),
         }
     );
     assert.equal(
@@ -237,11 +240,14 @@ void test("handles Git LFS paths and explicit default HTTPS port", async () => {
 });
 
 void test("ignores unsupported actions and contexts without work", async () => {
-    const runner = gitRunner([]);
+    let fetchCalls = 0;
+    const fetch = async () => {
+        fetchCalls += 1;
+        return response(500, {});
+    };
     for (const action of [undefined, "store", "erase", "other"]) {
         const result = await handleCredentialRequest(action, input, env, {
-            fetch: async () => response(500, {}),
-            runGit: runner.runGit,
+            fetch,
         });
         assert.deepEqual(result, { stdout: "", stderr: "", exitCode: 0 });
     }
@@ -249,37 +255,37 @@ void test("ignores unsupported actions and contexts without work", async () => {
         "get",
         "protocol=https\nhost=gitlab.com\npath=/owner/repo.git\n",
         env,
-        {
-            fetch: async () => response(500, {}),
-            runGit: runner.runGit,
-        }
+        { fetch }
     );
     assert.deepEqual(nonGitHub, { stdout: "", stderr: "", exitCode: 0 });
-    assert.equal(runner.calls.length, 0);
+    // Without credential.useHttpPath Git omits `path`, so the repository is
+    // unknown and the helper must fall through instead of guessing.
+    const withoutPath = await handleCredentialRequest(
+        "get",
+        "protocol=https\nhost=github.com\n\n",
+        env,
+        { fetch }
+    );
+    assert.deepEqual(withoutPath, { stdout: "", stderr: "", exitCode: 0 });
+    assert.equal(fetchCalls, 0);
 });
 
 void test("reports applicable failures without leaking secrets or quitting", async () => {
     // Unconfigured helper (no token) stays silent so Git can fall through
     // to the user's other credential providers.
-    const missingToken = await getResult(
-        async () => response(200, {}),
-        () => ({ success: true, stdout: "" }),
-        {
-            DEPLODASH_AGENT_TOKEN: "",
-        }
-    );
+    const missingToken = await getResult(async () => response(200, {}), {
+        DEPLODASH_AGENT_TOKEN: "",
+    });
     assert.deepEqual(missingToken, {
         stdout: "",
         stderr: "",
         exitCode: 0,
     });
 
-    const consent = await getResult(
-        async () =>
-            response(202, {
-                url: "https://example.test/auth/consent?repo=owner%2Frepo",
-            }),
-        () => ({ success: true, stdout: "" })
+    const consent = await getResult(async () =>
+        response(202, {
+            url: "https://example.test/auth/consent?repo=owner%2Frepo",
+        })
     );
     assert.equal(consent.stdout, "");
     const consentUrlMatch = /consent required: (\S+)/.exec(consent.stderr);
@@ -292,14 +298,12 @@ void test("reports applicable failures without leaking secrets or quitting", asy
     assert.equal(consent.stderr.includes("agent-secret"), false);
 
     const malformed = await getResult(
-        async () => new Response("not-json", { status: 200 }),
-        () => ({ success: true, stdout: "" })
+        async () => new Response("not-json", { status: 200 })
     );
     assert.equal(malformed.stdout, "");
 
     const badScopes = await getResult(
         async () => response(200, { token: "ghs_test" }),
-        () => ({ success: true, stdout: "" }),
         {
             DEPLODASH_SCOPES: " , ",
         }
@@ -321,7 +325,6 @@ void test("sends repository mode when DEPLODASH_REPO_MODE opts in", async () => 
                 effective_scopes: SUCCESS_SCOPES,
             });
         },
-        () => ({ success: true, stdout: "" }),
         { DEPLODASH_REPO_MODE: "create-if-missing" }
     );
     assert.equal(result.stdout.includes("ghs_test"), true);
@@ -330,7 +333,6 @@ void test("sends repository mode when DEPLODASH_REPO_MODE opts in", async () => 
 void test("rejects an invalid DEPLODASH_REPO_MODE without leaking secrets", async () => {
     const result = await getResult(
         async () => response(200, { token: "ghs_test" }),
-        () => ({ success: true, stdout: "" }),
         { DEPLODASH_REPO_MODE: "delete-everything" }
     );
     assert.equal(result.stdout, "");
@@ -340,7 +342,6 @@ void test("rejects an invalid DEPLODASH_REPO_MODE without leaking secrets", asyn
 void test("rejects unsupported DEPLODASH_SCOPES values before requesting consent", async () => {
     const result = await getResult(
         async () => response(200, { token: "ghs_test" }),
-        () => ({ success: true, stdout: "" }),
         { DEPLODASH_SCOPES: "contents:read,delete-everything" }
     );
     assert.equal(result.stdout, "");
@@ -414,9 +415,8 @@ void test("works through git credential fill with an isolated helper configurati
             "credential.https://github.com.helper",
             "",
         ]);
-        const helperCommand = join(
-            process.cwd(),
-            "scripts/deplodash-credential-helper.ts"
+        const helperCommand = fileURLToPath(
+            new URL("./deplodash-credential-helper.ts", import.meta.url)
         ).replaceAll("\\", "/");
         configure([
             "config",

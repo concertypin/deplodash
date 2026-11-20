@@ -78,11 +78,9 @@
         );
     }
 
-function delay(milliseconds: number): Promise<void> {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, milliseconds);
-    return promise;
-}
+    function delay(milliseconds: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, milliseconds));
+    }
 
     interface AgentToken {
         token: string;
@@ -126,16 +124,13 @@ function delay(milliseconds: number): Promise<void> {
 
     const route = `POST /api/token\n{ "owner": "my-org", "repo": "my-repo", "agent_id": "my-agent" }\nAuthorization: Bearer <agent-token>`;
 
-    let revokingGroupKey = $state<string | null>(null);
-
-    function consentGroupKey(group: ConsentGroup): string {
-        return `${group.repo.trim().toLowerCase()}|${group.agent_id ?? ""}`;
-    }
+    // One paced revoke batch at a time: every Revoke control is disabled
+    // while it runs, so no click is silently dropped.
+    let revokingConsent = $state(false);
 
     async function revokeConsentGroup(group: ConsentGroup) {
-        const groupKey = consentGroupKey(group);
-        if (revokingGroupKey !== null) return;
-        revokingGroupKey = groupKey;
+        if (revokingConsent) return;
+        revokingConsent = true;
         try {
             // The revoke endpoint shares the 10-per-10-second per-IP limiter
             // with consent and auth handlers, so pace every request instead
@@ -182,7 +177,7 @@ function delay(milliseconds: number): Promise<void> {
                 ? "You cannot revoke this consent"
                 : "Failed to revoke consent";
         } finally {
-            revokingGroupKey = null;
+            revokingConsent = false;
         }
     }
 
@@ -623,8 +618,7 @@ function delay(milliseconds: number): Promise<void> {
                                                             group
                                                         )}
                                                     aria-label={`Revoke access to ${group.repo}`}
-                                                    disabled={revokingGroupKey ===
-                                                        consentGroupKey(group)}
+                                                    disabled={revokingConsent}
                                                     class="text-error hover:text-error/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     Revoke
