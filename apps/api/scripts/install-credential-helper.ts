@@ -211,6 +211,9 @@ function configureGitHubHelpers(
     };
 
     // Nothing has changed if this fails, so it needs no rollback.
+    // Known limitation: the restore below runs only on thrown errors. If the
+    // process is killed between here and the last write, the previous
+    // section is lost (generic and system helpers are never touched).
     removeSection();
     try {
         for (const entry of previousSection) {
