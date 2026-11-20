@@ -48,6 +48,8 @@ async function isolatedGit(extraEnv: NodeJS.ProcessEnv = {}) {
         GIT_CONFIG_GLOBAL: join(temp, "gitconfig"),
         GIT_CONFIG_SYSTEM: join(temp, "system-gitconfig"),
         GIT_TERMINAL_PROMPT: "0",
+        // The installer matches Git's English "no such section" message.
+        LC_ALL: "C",
         ...extraEnv,
     };
     delete env.GIT_CONFIG_NOSYSTEM;
@@ -153,9 +155,13 @@ async function installerSandbox() {
     return {
         server,
         env,
-        install: () =>
-            runProcess("node", [installerPath], {
-                env: { ...env.env, DEPLODASH_INSTALL_DIR: installDir },
+        install: (extraEnv: NodeJS.ProcessEnv = {}) =>
+            runProcess(process.execPath, [installerPath], {
+                env: {
+                    ...env.env,
+                    DEPLODASH_INSTALL_DIR: installDir,
+                    ...extraEnv,
+                },
             }),
         fill: () =>
             runProcess("git", ["credential", "fill"], {
@@ -402,10 +408,188 @@ void test("fails without touching the config when the old section cannot be remo
                 : env.git(args);
         assert.throws(
             () => configureGitHubHelpers(lockedGit, "!deplodash-runner"),
-            /could not lock config file/
+            (error: unknown) =>
+                error instanceof Error &&
+                error.message.includes("could not lock config file") &&
+                // Nothing was changed, so the user must not be told to
+                // restore anything by hand.
+                !error.message.includes("could not be restored")
         );
         assert.deepEqual(env.getAll(["--global", "--list"]), configBefore);
     } finally {
         await env.cleanup();
+    }
+});
+
+void test("tells the user how to recover when both the write and the restore fail", async () => {
+    const env = await isolatedGit();
+    try {
+        env.configure([
+            "config",
+            "--global",
+            "credential.https://github.com.username",
+            "alice",
+        ]);
+        const runnerCommand = "!deplodash-runner";
+        let failing = false;
+        const brokenGit = (args: string[]): GitResult => {
+            if (args.includes(runnerCommand)) failing = true;
+            return failing && args.includes("--add")
+                ? { status: 255, stdout: "", stderr: "error: disk full" }
+                : env.git(args);
+        };
+        assert.throws(
+            () => configureGitHubHelpers(brokenGit, runnerCommand),
+            (error: unknown) =>
+                error instanceof Error &&
+                error.message.includes("could not be restored") &&
+                error.message.includes(
+                    "git config --global --remove-section credential.https://github.com"
+                ) &&
+                error.message.includes(
+                    "credential.https://github.com.username = alice"
+                )
+        );
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("leaves sibling hosts that share the github.com prefix alone", async () => {
+    const env = await isolatedGit();
+    try {
+        // A different host whose subsection starts with "https://github.com.".
+        const siblingKey =
+            "credential.https://github.com.example.internal.helper";
+        env.configure(["config", "--global", "--add", siblingKey, "!sibling"]);
+
+        // Installing twice is what used to duplicate the sibling's entries.
+        const runnerCommand =
+            "!node '/opt/deplodash-credential-helper-run.mjs'";
+        configureGitHubHelpers(env.git, runnerCommand);
+        configureGitHubHelpers(env.git, runnerCommand);
+
+        assert.deepEqual(env.getAll(["--global", "--get-all", siblingKey]), [
+            "!sibling",
+        ]);
+        assert.deepEqual(
+            env.getAll(["--global", "--get-all", githubHelperKey]),
+            ["", runnerCommand]
+        );
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("keeps every host-wide spelling of github.com as a fallback and warns about narrower ones", async () => {
+    const env = await isolatedGit();
+    try {
+        // Git's URL matching treats all of these as the github.com host.
+        env.configure([
+            "config",
+            "--system",
+            "--add",
+            githubHelperKey,
+            env.loggingHelper("system-github"),
+        ]);
+        for (const [url, name] of [
+            ["https://GitHub.com", "mixed-case"],
+            ["https://github.com/", "trailing-slash"],
+            ["https://github.com:443", "default-port"],
+        ] as const) {
+            env.configure([
+                "config",
+                "--global",
+                "--add",
+                `credential.${url}.helper`,
+                env.loggingHelper(name),
+            ]);
+        }
+        // Applies to some repositories only, so it is not widened.
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.https://github.com/owner.helper",
+            env.loggingHelper("path-scoped"),
+        ]);
+        env.configure([
+            "config",
+            "--global",
+            "includeIf.gitdir:~/work/.path",
+            "~/work.gitconfig",
+        ]);
+
+        const { warnings } = configureGitHubHelpers(
+            env.git,
+            env.loggingHelper("deplodash")
+        );
+
+        await runProcess("git", ["credential", "fill"], {
+            env: env.env,
+            input: "url=https://github.com/owner/repo.git\n\n",
+        });
+        assert.deepEqual(await env.consultedHelpers(), [
+            "deplodash",
+            "system-github",
+            "mixed-case",
+            "trailing-slash",
+            "default-port",
+        ]);
+        assert.equal(warnings.length, 2);
+        assert.equal(
+            warnings[0]?.includes("credential.https://github.com/owner.helper"),
+            true
+        );
+        assert.equal(warnings[1]?.includes("includeIf"), true);
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("replaces an existing useHttpPath setting instead of duplicating it", async () => {
+    const env = await isolatedGit();
+    try {
+        env.configure([
+            "config",
+            "--global",
+            "credential.https://github.com.useHttpPath",
+            "false",
+        ]);
+
+        const { warnings } = configureGitHubHelpers(
+            env.git,
+            env.loggingHelper("deplodash")
+        );
+
+        assert.deepEqual(warnings, []);
+        assert.deepEqual(
+            env.getAll([
+                "--global",
+                "--get-all",
+                "credential.https://github.com.useHttpPath",
+            ]),
+            ["true"]
+        );
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("reports a missing git binary instead of a bare exit code", async () => {
+    const { install, cleanup } = await installerSandbox();
+    try {
+        // Only node itself stays reachable; git is gone from PATH.
+        const pathKeys = Object.keys(process.env).filter(
+            (key) => key.toUpperCase() === "PATH"
+        );
+        const withoutGit: NodeJS.ProcessEnv = Object.fromEntries(
+            pathKeys.map((key) => [key, dirname(process.execPath)])
+        );
+        const result = await install(withoutGit);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /ENOENT/);
+    } finally {
+        await cleanup();
     }
 });

@@ -48,8 +48,9 @@ export function buildConsentUrl(
         repoMode: RepositoryMode;
     }
 ): string {
+    const origin = baseUrl.replace(/\/+$/, "");
     return (
-        `${baseUrl}/auth/consent?repo=${encodeURIComponent(params.repo)}` +
+        `${origin}/auth/consent?repo=${encodeURIComponent(params.repo)}` +
         `&agent_id=${encodeURIComponent(params.agentId)}` +
         `&scopes=${encodeURIComponent(params.scopes.join(","))}` +
         `&repo_mode=${encodeURIComponent(params.repoMode)}`

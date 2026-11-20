@@ -30,6 +30,10 @@ const GITHUB_SECTION = "credential.https://github.com";
 const GITHUB_HELPER_KEY = `${GITHUB_SECTION}.helper`;
 const GITHUB_USE_HTTP_PATH_KEY = `${GITHUB_SECTION}.usehttppath`;
 const DEPLODASH_MARKER = "deplodash-credential-helper";
+// Subsections Git's URL matching treats as the whole github.com host, and
+// ones it treats as a path prefix on it (only some repositories).
+const GITHUB_HOST_SUBSECTION = /^https:\/\/github\.com(?::443)?\/?$/i;
+const GITHUB_PATH_SUBSECTION = /^https:\/\/github\.com(?::443)?\/./i;
 
 function spawnGit(args: string[]): GitResult {
     const result = spawnSync("git", args, {
@@ -43,7 +47,8 @@ function spawnGit(args: string[]): GitResult {
     return {
         status: result.status,
         stdout: String(result.stdout ?? ""),
-        stderr: String(result.stderr ?? ""),
+        // A spawn failure (e.g. git is not installed) has no stderr.
+        stderr: String(result.stderr ?? "") || (result.error?.message ?? ""),
     };
 }
 
@@ -77,33 +82,62 @@ function parseConfigEntry(record: string): ConfigEntry {
         : { key: record.slice(0, newline), value: record.slice(newline + 1) };
 }
 
-/**
- * The helpers Git currently consults for github.com from system and global
- * config, in order. An empty value resets the list collected so far, exactly
- * as Git applies it. Repository-local and command-line helpers are left out:
- * Git reads them after global config, so they still run after Deplodash.
- * Helpers behind a conditional `includeIf` are not carried over, because Git
- * runs here outside any repository where those conditions could match.
- */
-function effectiveFallbackHelpers(git: Git): string[] {
-    const records = readConfigRecords(git, [
-        "--includes",
-        "--show-scope",
-        "--get-regexp",
-        "^credential\\.(https://github\\.com\\.)?helper$",
-    ]);
-    let helpers: string[] = [];
+/** Records of `git config --show-scope` limited to system and global config. */
+function systemAndGlobalEntries(git: Git, args: string[]): ConfigEntry[] {
+    const records = readConfigRecords(git, ["--show-scope", ...args]);
+    const entries: ConfigEntry[] = [];
     for (let index = 0; index + 1 < records.length; index += 2) {
         const scope = records[index];
-        const { value } = parseConfigEntry(records[index + 1] ?? "");
         if (scope !== "system" && scope !== "global") continue;
+        entries.push(parseConfigEntry(records[index + 1] ?? ""));
+    }
+    return entries;
+}
+
+/** The URL of a `credential.<url>.helper` key, or "" for `credential.helper`. */
+function credentialHelperUrl(key: string): string {
+    return key === "credential.helper"
+        ? ""
+        : key.slice("credential.".length, -".helper".length);
+}
+
+/**
+ * The helpers Git currently consults for github.com from system and global
+ * config, in order: generic ones and every host-wide spelling of github.com
+ * (`https://GitHub.com`, a trailing slash, the default port). An empty value
+ * resets the list collected so far, exactly as Git applies it.
+ * Repository-local and command-line helpers are left out: Git reads them
+ * after global config, so they still run after Deplodash. Path-scoped
+ * github.com helpers are reported separately because carrying them over
+ * would widen them to every repository.
+ */
+function effectiveFallbackHelpers(git: Git): {
+    helpers: string[];
+    pathScopedKeys: string[];
+} {
+    let helpers: string[] = [];
+    const pathScopedKeys: string[] = [];
+    for (const { key, value } of systemAndGlobalEntries(git, [
+        "--includes",
+        "--get-regexp",
+        "^credential\\.(.+\\.)?helper$",
+    ])) {
+        const url = credentialHelperUrl(key);
+        if (GITHUB_PATH_SUBSECTION.test(url)) {
+            pathScopedKeys.push(key);
+            continue;
+        }
+        if (url !== "" && !GITHUB_HOST_SUBSECTION.test(url)) continue;
         helpers = value === "" ? [] : [...helpers, value];
     }
-    return [
-        ...new Set(
-            helpers.filter((helper) => !helper.includes(DEPLODASH_MARKER))
-        ),
-    ];
+    return {
+        helpers: [
+            ...new Set(
+                helpers.filter((helper) => !helper.includes(DEPLODASH_MARKER))
+            ),
+        ],
+        pathScopedKeys: [...new Set(pathScopedKeys)],
+    };
 }
 
 /**
@@ -116,15 +150,28 @@ function effectiveFallbackHelpers(git: Git): string[] {
  * list, the Deplodash runner, then every previously effective helper as a
  * fallback. The user's generic `credential.helper` entries are untouched.
  * `useHttpPath` is required because Git only passes the repository path to
- * helpers when it is set. If any step fails, the previous section is
+ * helpers when it is set. If a write fails, the previous section is
  * restored.
+ *
+ * The reset also clears helpers that only apply to some github.com
+ * repositories (path-scoped sections, conditional `includeIf` files) because
+ * they come earlier in the config; the returned warnings name them.
  */
-function configureGitHubHelpers(git: Git, runnerCommand: string): void {
-    const fallbackHelpers = effectiveFallbackHelpers(git);
+function configureGitHubHelpers(
+    git: Git,
+    runnerCommand: string
+): { warnings: string[] } {
+    const fallback = effectiveFallbackHelpers(git);
+    const conditionalIncludes = systemAndGlobalEntries(git, [
+        "--get-regexp",
+        "^includeif\\.",
+    ]);
+    // Variable names contain no dots, which keeps sibling hosts such as
+    // `https://github.com.example.internal` out of this section.
     const previousSection = readConfigRecords(git, [
         "--global",
         "--get-regexp",
-        "^credential\\.https://github\\.com\\.",
+        "^credential\\.https://github\\.com\\.[^.]+$",
     ]).map(parseConfigEntry);
     const add = (key: string, value: string): void =>
         runGit(git, ["config", "--global", "--add", key, value]);
@@ -137,8 +184,9 @@ function configureGitHubHelpers(git: Git, runnerCommand: string): void {
             throw gitFailure(args, result);
     };
 
+    // Nothing has changed if this fails, so it needs no rollback.
+    removeSection();
     try {
-        removeSection();
         for (const entry of previousSection) {
             const key = entry.key.toLowerCase();
             if (key === GITHUB_HELPER_KEY || key === GITHUB_USE_HTTP_PATH_KEY)
@@ -147,7 +195,7 @@ function configureGitHubHelpers(git: Git, runnerCommand: string): void {
         }
         add(GITHUB_HELPER_KEY, "");
         add(GITHUB_HELPER_KEY, runnerCommand);
-        for (const helper of fallbackHelpers) add(GITHUB_HELPER_KEY, helper);
+        for (const helper of fallback.helpers) add(GITHUB_HELPER_KEY, helper);
         add(GITHUB_USE_HTTP_PATH_KEY, "true");
     } catch (error: unknown) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -155,11 +203,15 @@ function configureGitHubHelpers(git: Git, runnerCommand: string): void {
             removeSection();
             for (const entry of previousSection) add(entry.key, entry.value);
         } catch {
-            const lines = previousSection.map(
-                (entry) => `  ${entry.key} = ${entry.value}`
-            );
+            const removeCommand = `git config --global --remove-section ${GITHUB_SECTION}`;
+            const recovery =
+                previousSection.length === 0
+                    ? `Remove the partial section manually with: ${removeCommand}`
+                    : `Remove the partial section with \`${removeCommand}\`, then restore these settings manually:\n${previousSection
+                          .map((entry) => `  ${entry.key} = ${entry.value}`)
+                          .join("\n")}`;
             throw new Error(
-                `Git configuration failed (${reason}) and the previous ${GITHUB_SECTION} settings could not be restored. Restore them manually:\n${lines.join("\n")}`,
+                `Git configuration failed (${reason}) and the previous ${GITHUB_SECTION} settings could not be restored. ${recovery}`,
                 { cause: error }
             );
         }
@@ -168,6 +220,18 @@ function configureGitHubHelpers(git: Git, runnerCommand: string): void {
             { cause: error }
         );
     }
+
+    const sectionHeader = `[credential "https://github.com"]`;
+    const warnings = fallback.pathScopedKeys.map(
+        (key) =>
+            `${key} is now reset by the ${sectionHeader} section. If you still need it, move it below that section in your global Git config.`
+    );
+    if (conditionalIncludes.length > 0) {
+        warnings.push(
+            `Your Git config uses includeIf. If an included file sets a credential helper, the ${sectionHeader} section now resets it for github.com; move that includeIf below the section if you still need the helper.`
+        );
+    }
+    return { warnings };
 }
 
 function shellQuote(value: string): string {
@@ -284,10 +348,12 @@ async function main(): Promise<void> {
     }
     // Prior Deplodash entries are dropped, so reinstalling (e.g. rotating the
     // token) does not stack helpers that each fire a /api/token request.
-    configureGitHubHelpers(
+    const { warnings } = configureGitHubHelpers(
         spawnGit,
         `!node ${shellQuote(runnerPath.replaceAll("\\", "/"))}`
     );
+    for (const warning of warnings)
+        process.stderr.write(`warning: ${warning}\n`);
     process.stdout.write(
         "Installed Deplodash credential helper for HTTPS GitHub remotes.\n"
     );

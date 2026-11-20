@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "vitest-browser-svelte";
 import HomePage from "@/lib/HomePage.svelte";
+import { reloadPage } from "@/lib/router.svelte";
+
+// A real reload would tear down the test page; spy on the export instead.
+vi.mock("@/lib/router.svelte", { spy: true });
 
 function mockFetchOnce(data: Record<string, unknown>, status = 200) {
     return Promise.resolve(
@@ -17,10 +21,12 @@ describe("HomePage", () => {
     beforeEach(() => {
         mockFetch = vi.fn<typeof fetch>();
         vi.stubGlobal("fetch", mockFetch);
+        vi.mocked(reloadPage).mockImplementation(() => {});
     });
 
     afterEach(() => {
         vi.unstubAllGlobals();
+        vi.mocked(reloadPage).mockReset();
     });
 
     function mockDashboardFetch(
@@ -651,5 +657,37 @@ describe("HomePage", () => {
         await expect.poll(() => revokeCalls.length).toBe(2);
         await expect.element(revokeControl).toBeEnabled();
         await expect.element(otherRevokeControl).toBeEnabled();
+    });
+
+    it("reloads after a fully successful revoke and keeps the controls disabled until then", async () => {
+        const consents = [
+            {
+                repo: "owner/repo",
+                scopes: "contents:write",
+                granted_at: "2026-07-20T00:00:00Z",
+                agent_id: "agent-a",
+            },
+        ];
+        const revokeCalls = mockDashboardFetch(consents);
+
+        const screen = await render(HomePage);
+
+        const revokeControl = screen.getByRole("button", {
+            name: "Revoke access to owner/repo",
+        });
+        await revokeControl.click();
+
+        await expect
+            .poll(() => vi.mocked(reloadPage).mock.calls.length)
+            .toBe(1);
+        expect(revokeCalls).toEqual([
+            {
+                repo: "owner/repo",
+                scopes: "contents:write",
+                agent_id: "agent-a",
+            },
+        ]);
+        // No flash of enabled controls between the success and the reload.
+        await expect.element(revokeControl).toBeDisabled();
     });
 });

@@ -81,4 +81,14 @@ describe("buildConsentUrl", () => {
         expect(params.get("agent_id")).toBe("agent &id");
         expect(params.get("scopes")).toBe("contents:write,workflows:write");
     });
+
+    it("does not produce a double slash when the base URL ends with one", () => {
+        const url = buildConsentUrl("https://deplodash.example//", {
+            repo: "owner/repo",
+            agentId: "agent",
+            scopes: ["contents:read"],
+            repoMode: "existing-only",
+        });
+        expect(new URL(url).pathname).toBe("/auth/consent");
+    });
 });

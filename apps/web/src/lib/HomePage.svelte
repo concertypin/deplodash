@@ -2,6 +2,7 @@
     import { SvelteMap, SvelteSet } from "svelte/reactivity";
     import { GithubLogoIcon } from "phosphor-svelte";
     import { client } from "@/lib/api";
+    import { reloadPage } from "@/lib/router.svelte";
     interface ConsentItem {
         repo: string;
         scopes: string;
@@ -131,6 +132,9 @@
     async function revokeConsentGroup(group: ConsentGroup) {
         if (revokingConsent) return;
         revokingConsent = true;
+        // A full success reloads the page; keep the controls disabled until
+        // the reload replaces them instead of flashing them back on.
+        let reloading = false;
         try {
             // The revoke endpoint shares the 10-per-10-second per-IP limiter
             // with consent and auth handlers, so pace every request instead
@@ -153,7 +157,8 @@
                         result.status === "fulfilled" && result.value.ok
                 )
             ) {
-                window.location.reload();
+                reloading = true;
+                reloadPage();
                 return;
             }
             const succeededKeys = new SvelteSet<string>();
@@ -177,7 +182,7 @@
                 ? "You cannot revoke this consent"
                 : "Failed to revoke consent";
         } finally {
-            revokingConsent = false;
+            if (!reloading) revokingConsent = false;
         }
     }
 
@@ -228,7 +233,7 @@
                 },
             });
             if (res.ok) {
-                window.location.reload();
+                reloadPage();
             } else {
                 error = "Failed to create agent token";
                 isSubmitting = false;
@@ -246,7 +251,7 @@
                 json: { token },
             });
             if (res.ok) {
-                window.location.reload();
+                reloadPage();
             } else if (res.status === 403) {
                 error = "You cannot revoke this token";
             }

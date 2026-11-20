@@ -14,6 +14,14 @@ export function navigate(path: string): void {
     route.current = window.location.pathname;
 }
 
+/**
+ * Reload the current page. A module export (unlike `window.location.reload`,
+ * which browsers make non-configurable) so browser tests can replace it.
+ */
+export function reloadPage(): void {
+    window.location.reload();
+}
+
 // Listen for browser back/forward
 if (typeof window !== "undefined") {
     window.addEventListener("popstate", () => {
