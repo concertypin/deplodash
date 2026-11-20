@@ -103,7 +103,7 @@ Uses the session cookie created by the login flow and returns the user OAuth tok
 
 ### HTTPS credential helper for git push
 
-Install the Node 24 helper and configure Git in one command:
+Install the helper (Node 24 and Git 2.26 or newer) and configure Git in one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh

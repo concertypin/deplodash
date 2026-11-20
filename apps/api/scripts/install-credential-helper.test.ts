@@ -513,6 +513,14 @@ void test("keeps every host-wide spelling of github.com as a fallback and warns 
             "credential.https://github.com/owner.helper",
             env.loggingHelper("path-scoped"),
         ]);
+        // Applies only to remotes that carry this user name.
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.https://alice@github.com.helper",
+            env.loggingHelper("user-scoped"),
+        ]);
         env.configure([
             "config",
             "--global",
@@ -536,12 +544,18 @@ void test("keeps every host-wide spelling of github.com as a fallback and warns 
             "trailing-slash",
             "default-port",
         ]);
-        assert.equal(warnings.length, 2);
-        assert.equal(
-            warnings[0]?.includes("credential.https://github.com/owner.helper"),
-            true
-        );
-        assert.equal(warnings[1]?.includes("includeIf"), true);
+        assert.equal(warnings.length, 3);
+        for (const expected of [
+            "credential.https://github.com/owner.helper",
+            "credential.https://alice@github.com.helper",
+            "includeIf",
+        ]) {
+            assert.equal(
+                warnings.some((warning) => warning.includes(expected)),
+                true,
+                `missing warning for ${expected}: ${JSON.stringify(warnings)}`
+            );
+        }
     } finally {
         await env.cleanup();
     }
@@ -579,17 +593,111 @@ void test("replaces an existing useHttpPath setting instead of duplicating it", 
 void test("reports a missing git binary instead of a bare exit code", async () => {
     const { install, cleanup } = await installerSandbox();
     try {
-        // Only node itself stays reachable; git is gone from PATH.
+        // An empty PATH directory: node is started by absolute path, and git
+        // cannot be found even where it shares a directory with node.
+        const emptyBin = await mkdtemp(join(tmpdir(), "deplodash-no-git-"));
         const pathKeys = Object.keys(process.env).filter(
             (key) => key.toUpperCase() === "PATH"
         );
         const withoutGit: NodeJS.ProcessEnv = Object.fromEntries(
-            pathKeys.map((key) => [key, dirname(process.execPath)])
+            pathKeys.map((key) => [key, emptyBin])
         );
-        const result = await install(withoutGit);
-        assert.notEqual(result.status, 0);
-        assert.match(result.stderr, /ENOENT/);
+        try {
+            const result = await install(withoutGit);
+            assert.notEqual(result.status, 0);
+            assert.match(result.stderr, /ENOENT/);
+        } finally {
+            await rm(emptyBin, { recursive: true, force: true });
+        }
     } finally {
         await cleanup();
+    }
+});
+
+void test("upgrades the layout written by the previous installer", async () => {
+    const env = await isolatedGit();
+    try {
+        // The earlier installer put its runner first in the github.com
+        // section, kept other GitHub helpers after it, and wrote no reset.
+        env.configure([
+            "config",
+            "--system",
+            "--add",
+            "credential.helper",
+            env.loggingHelper("system"),
+        ]);
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            githubHelperKey,
+            "!node '/old/deplodash-credential-helper-run.mjs'",
+        ]);
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            githubHelperKey,
+            env.loggingHelper("old-github"),
+        ]);
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.helper",
+            env.loggingHelper("generic"),
+        ]);
+
+        configureGitHubHelpers(env.git, env.loggingHelper("deplodash"));
+
+        await runProcess("git", ["credential", "fill"], {
+            env: env.env,
+            input: "url=https://github.com/owner/repo.git\n\n",
+        });
+        // The stale runner is gone and every provider runs exactly once.
+        assert.deepEqual(await env.consultedHelpers(), [
+            "deplodash",
+            "system",
+            "old-github",
+            "generic",
+        ]);
+        assert.equal(
+            env
+                .getAll(["--global", "--get-all", githubHelperKey])
+                .some((helper) => helper.includes("/old/")),
+            false
+        );
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("explains that Git 2.26 is required when --show-scope is unknown", async () => {
+    const env = await isolatedGit();
+    try {
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            githubHelperKey,
+            "!previous-helper",
+        ]);
+        const configBefore = env.getAll(["--global", "--list"]);
+        // Git before 2.26 rejects --show-scope as a usage error (exit 129).
+        const oldGit = (args: string[]): GitResult =>
+            args.includes("--show-scope")
+                ? {
+                      status: 129,
+                      stdout: "",
+                      stderr: "error: unknown option `show-scope'",
+                  }
+                : env.git(args);
+        assert.throws(
+            () => configureGitHubHelpers(oldGit, "!deplodash-runner"),
+            /Git 2\.26 or newer is required/
+        );
+        assert.deepEqual(env.getAll(["--global", "--list"]), configBefore);
+    } finally {
+        await env.cleanup();
     }
 });

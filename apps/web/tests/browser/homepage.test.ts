@@ -26,7 +26,9 @@ describe("HomePage", () => {
 
     afterEach(() => {
         vi.unstubAllGlobals();
-        vi.mocked(reloadPage).mockReset();
+        // mockClear, not mockReset: a reset would restore the real reload,
+        // and a late reloadPage() call would tear down the test page.
+        vi.mocked(reloadPage).mockClear();
     });
 
     function mockDashboardFetch(

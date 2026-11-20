@@ -30,10 +30,6 @@ const GITHUB_SECTION = "credential.https://github.com";
 const GITHUB_HELPER_KEY = `${GITHUB_SECTION}.helper`;
 const GITHUB_USE_HTTP_PATH_KEY = `${GITHUB_SECTION}.usehttppath`;
 const DEPLODASH_MARKER = "deplodash-credential-helper";
-// Subsections Git's URL matching treats as the whole github.com host, and
-// ones it treats as a path prefix on it (only some repositories).
-const GITHUB_HOST_SUBSECTION = /^https:\/\/github\.com(?::443)?\/?$/i;
-const GITHUB_PATH_SUBSECTION = /^https:\/\/github\.com(?::443)?\/./i;
 
 function spawnGit(args: string[]): GitResult {
     const result = spawnSync("git", args, {
@@ -70,6 +66,12 @@ function readConfigRecords(git: Git, args: string[]): string[] {
     const result = git(fullArgs);
     // Exit 1 means no key matched.
     if (result.status === 1) return [];
+    // Exit 129 is a usage error; every option used here exists in old Git
+    // except --show-scope, which arrived in Git 2.26.
+    if (result.status === 129)
+        throw new Error(
+            `Git 2.26 or newer is required (${gitFailure(fullArgs, result).message})`
+        );
     if (result.status !== 0) throw gitFailure(fullArgs, result);
     return result.stdout.split("\0").slice(0, -1);
 }
@@ -102,32 +104,54 @@ function credentialHelperUrl(key: string): string {
 }
 
 /**
+ * How a `credential.<url>` config URL relates to github.com under Git's URL
+ * matching: `host` covers every github.com remote (also `https://GitHub.com`,
+ * a trailing slash or the default port), `narrower` covers only some of
+ * them (a path prefix or a user name), `other` covers none.
+ */
+function githubCoverage(url: string): "host" | "narrower" | "other" {
+    if (url === "") return "host";
+    let parsed: URL;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return "other";
+    }
+    // URL lowercases the host and drops the default :443 port.
+    if (
+        parsed.protocol !== "https:" ||
+        parsed.hostname !== "github.com" ||
+        parsed.port !== ""
+    )
+        return "other";
+    return parsed.username === "" && parsed.pathname === "/"
+        ? "host"
+        : "narrower";
+}
+
+/**
  * The helpers Git currently consults for github.com from system and global
- * config, in order: generic ones and every host-wide spelling of github.com
- * (`https://GitHub.com`, a trailing slash, the default port). An empty value
- * resets the list collected so far, exactly as Git applies it.
+ * config, in order: generic ones and every host-wide github.com section. An
+ * empty value resets the list collected so far, exactly as Git applies it.
  * Repository-local and command-line helpers are left out: Git reads them
- * after global config, so they still run after Deplodash. Path-scoped
- * github.com helpers are reported separately because carrying them over
- * would widen them to every repository.
+ * after global config, so they still run after Deplodash. Helpers scoped
+ * more narrowly (a path or user name) are reported separately because
+ * carrying them over would widen them to every repository.
  */
 function effectiveFallbackHelpers(git: Git): {
     helpers: string[];
-    pathScopedKeys: string[];
+    narrowerKeys: string[];
 } {
     let helpers: string[] = [];
-    const pathScopedKeys: string[] = [];
+    const narrowerKeys: string[] = [];
     for (const { key, value } of systemAndGlobalEntries(git, [
         "--includes",
         "--get-regexp",
         "^credential\\.(.+\\.)?helper$",
     ])) {
-        const url = credentialHelperUrl(key);
-        if (GITHUB_PATH_SUBSECTION.test(url)) {
-            pathScopedKeys.push(key);
-            continue;
-        }
-        if (url !== "" && !GITHUB_HOST_SUBSECTION.test(url)) continue;
+        const coverage = githubCoverage(credentialHelperUrl(key));
+        if (coverage === "narrower") narrowerKeys.push(key);
+        if (coverage !== "host") continue;
         helpers = value === "" ? [] : [...helpers, value];
     }
     return {
@@ -136,7 +160,7 @@ function effectiveFallbackHelpers(git: Git): {
                 helpers.filter((helper) => !helper.includes(DEPLODASH_MARKER))
             ),
         ],
-        pathScopedKeys: [...new Set(pathScopedKeys)],
+        narrowerKeys: [...new Set(narrowerKeys)],
     };
 }
 
@@ -153,9 +177,11 @@ function effectiveFallbackHelpers(git: Git): {
  * helpers when it is set. If a write fails, the previous section is
  * restored.
  *
- * The reset also clears helpers that only apply to some github.com
- * repositories (path-scoped sections, conditional `includeIf` files) because
- * they come earlier in the config; the returned warnings name them.
+ * The reset also clears helpers that only apply to some github.com remotes
+ * (a path or user name in the section URL, conditional `includeIf` files)
+ * because they come earlier in the config; the returned warnings name them.
+ * The fallbacks are a snapshot: rerun the installer after changing the
+ * generic or system credential helper.
  */
 function configureGitHubHelpers(
     git: Git,
@@ -222,9 +248,9 @@ function configureGitHubHelpers(
     }
 
     const sectionHeader = `[credential "https://github.com"]`;
-    const warnings = fallback.pathScopedKeys.map(
+    const warnings = fallback.narrowerKeys.map(
         (key) =>
-            `${key} is now reset by the ${sectionHeader} section. If you still need it, move it below that section in your global Git config.`
+            `${key} applies to only some github.com remotes and is now reset by the ${sectionHeader} section. If you still need it, move it below that section in your global Git config.`
     );
     if (conditionalIncludes.length > 0) {
         warnings.push(
