@@ -22,7 +22,8 @@ type TokenResponse = {
 
 const REPOSITORY_PATTERN =
     /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9-._]+$/;
-const DEFAULT_DEPLODASH_URL = "https://deplodash.condev.workers.dev";
+// The production custom domain (`routes` in apps/api/wrangler.jsonc).
+const DEFAULT_DEPLODASH_URL = "https://deplodash.euroka.moe";
 const REQUEST_TIMEOUT_MS = 15_000;
 const REPOSITORY_MODES: Record<string, true> = {
     "existing-only": true,

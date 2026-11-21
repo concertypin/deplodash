@@ -1,11 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import * as z from "zod";
 import {
     COMPOUND_SCOPES,
     SCOPE_TO_GITHUB,
@@ -107,6 +108,49 @@ void test("returns credentials for a successful token request", async () => {
         repo: "owner/repo",
         scopes: SUCCESS_SCOPES,
     });
+});
+
+void test("defaults to the production custom domain when DEPLODASH_URL is unset", async () => {
+    // The helper ships standalone, so it hardcodes the default host; keep it
+    // in step with the Worker's custom domain when the deployment moves.
+    const wranglerConfig = z
+        .object({
+            routes: z
+                .array(
+                    z.object({
+                        pattern: z.string(),
+                        custom_domain: z.literal(true),
+                    })
+                )
+                .min(1),
+        })
+        .parse(
+            JSON.parse(
+                await readFile(
+                    new URL("../wrangler.jsonc", import.meta.url),
+                    "utf8"
+                )
+            )
+        );
+    let requestedUrl: string | undefined;
+    await handleCredentialRequest(
+        "get",
+        input,
+        { DEPLODASH_AGENT_TOKEN: "agent-secret" },
+        {
+            fetch: async (url, init) => {
+                requestedUrl = new Request(url, init).url;
+                return response(200, {
+                    token: "ghs_test",
+                    effective_scopes: SUCCESS_SCOPES,
+                });
+            },
+        }
+    );
+    assert.equal(
+        requestedUrl,
+        `https://${wranglerConfig.routes[0]?.pattern}/api/token`
+    );
 });
 
 void test("requests the trimmed, deduplicated DEPLODASH_SCOPES override", async () => {
