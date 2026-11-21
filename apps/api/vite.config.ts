@@ -57,7 +57,7 @@ const buildConfig: Config["build"] = {
 
 export default defineConfig(() => {
     const cloudflarePlugin = isVitest
-        ? cloudflareTest({ wrangler: { configPath: "./wrangler.json" } })
+        ? cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })
         : cloudflare();
     return {
         plugins: [cloudflarePlugin],

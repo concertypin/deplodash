@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import * as z from "zod";
 
-const sourceConfigUrl = new URL("../wrangler.json", import.meta.url);
+const sourceConfigUrl = new URL("../wrangler.jsonc", import.meta.url);
 const generatedConfigUrl = new URL(
     "../dist/deplodash/wrangler.json",
     import.meta.url
