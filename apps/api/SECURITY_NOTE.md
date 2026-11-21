@@ -75,7 +75,7 @@ with a matching `granted_by` field are returned. The dashboard calls
 `ConsentOwnershipError`. `POST /api/consent/revoke` passes the authenticated
 GitHub user as the caller.
 
-### F-DIS-004 — Token API Rate Limiting (src/routes/token.ts, wrangler.json)
+### F-DIS-004 — Token API Rate Limiting (src/routes/token.ts, wrangler.jsonc)
 
 **Status**: Resolved.
 

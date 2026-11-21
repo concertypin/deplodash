@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as z from "zod";
-import workerConfigText from "@root/apps/api/wrangler.json?raw";
+import workerConfigText from "@root/apps/api/wrangler.jsonc?raw";
 
 const workerConfigSchema = z.object({
     assets: z.looseObject({
