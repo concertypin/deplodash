@@ -61,7 +61,7 @@ describe("GET /auth/github", () => {
     it("uses CALLBACK_URL for non-localhost requests", async () => {
         const app = new Hono<HonoEnv>().route("/auth", authRouter);
         const resp = await app.fetch(
-            new Request("https://deplodash.condev.workers.dev/auth/github"),
+            new Request("https://deplodash.euroka.moe/auth/github"),
             BASE_ENV
         );
         expect(resp.status).toBe(302);

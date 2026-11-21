@@ -8,7 +8,7 @@ describe("static asset fallback", () => {
             Promise.resolve(new Response("SPA shell"))
         );
         const response = await app.fetch(
-            new Request("https://deplodash.condev.workers.dev/auth/consent"),
+            new Request("https://deplodash.euroka.moe/auth/consent"),
             makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
         );
 
@@ -18,7 +18,7 @@ describe("static asset fallback", () => {
         expect(fetchAsset).toHaveBeenCalledWith(
             expect.objectContaining({
                 method: "GET",
-                url: "https://deplodash.condev.workers.dev/auth/consent",
+                url: "https://deplodash.euroka.moe/auth/consent",
             })
         );
     });
@@ -28,9 +28,7 @@ describe("static asset fallback", () => {
             Promise.resolve(new Response("JavaScript"))
         );
         const response = await app.fetch(
-            new Request(
-                "https://deplodash.condev.workers.dev/assets/app-123.js"
-            ),
+            new Request("https://deplodash.euroka.moe/assets/app-123.js"),
             makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
         );
 
@@ -40,7 +38,7 @@ describe("static asset fallback", () => {
         expect(fetchAsset).toHaveBeenCalledWith(
             expect.objectContaining({
                 method: "GET",
-                url: "https://deplodash.condev.workers.dev/assets/app-123.js",
+                url: "https://deplodash.euroka.moe/assets/app-123.js",
             })
         );
     });
@@ -50,7 +48,7 @@ describe("static asset fallback", () => {
             Promise.resolve(new Response("SPA shell"))
         );
         const response = await app.fetch(
-            new Request("https://deplodash.condev.workers.dev/API/missing"),
+            new Request("https://deplodash.euroka.moe/API/missing"),
             makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
         );
 
@@ -63,7 +61,7 @@ describe("static asset fallback", () => {
             Promise.resolve(new Response("SPA shell"))
         );
         const response = await app.fetch(
-            new Request("https://deplodash.condev.workers.dev/auth/consent", {
+            new Request("https://deplodash.euroka.moe/auth/consent", {
                 method: "POST",
             }),
             makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
@@ -78,7 +76,7 @@ describe("static asset fallback", () => {
             Promise.resolve(new Response("SPA shell"))
         );
         const response = await app.fetch(
-            new Request("https://deplodash.condev.workers.dev/auth/github"),
+            new Request("https://deplodash.euroka.moe/auth/github"),
             makeBaseEnv({ ASSETS: { fetch: fetchAsset } })
         );
 
