@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
     configureGitHubHelpers,
+    confirmInstall,
     unwrapFallback,
     wrappedFallbackCommand,
     type GitResult,
@@ -29,7 +30,12 @@ async function runProcess(
     args: string[],
     options: { env: NodeJS.ProcessEnv; input?: string }
 ): Promise<{ status: number | null; stdout: string; stderr: string }> {
-    const child = spawn(command, args, { env: options.env });
+    // A new session has no controlling terminal, so an installer prompt can
+    // never block the test run even when it is started from a terminal.
+    const child = spawn(command, args, {
+        env: options.env,
+        detached: process.platform !== "win32",
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -170,8 +176,8 @@ async function installerSandbox() {
     return {
         server,
         env,
-        install: (extraEnv: NodeJS.ProcessEnv = {}) =>
-            runProcess(process.execPath, [installerPath], {
+        install: (extraEnv: NodeJS.ProcessEnv = {}, args = ["--yes"]) =>
+            runProcess(process.execPath, [installerPath, ...args], {
                 env: {
                     ...env.env,
                     DEPLODASH_INSTALL_DIR: installDir,
@@ -195,7 +201,9 @@ void test("a first install on an empty Git config succeeds without Git errors", 
     try {
         const result = await install();
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(result.stderr, "");
+        // Only the useHttpPath notice; no Git error or warning.
+        assert.doesNotMatch(result.stderr, /fatal|error|warning/i);
+        assert.match(result.stderr, /useHttpPath=true/);
         const issued = await fill();
         assert.equal(issued.stdout.includes("password=ghs_test"), true);
     } finally {
@@ -848,5 +856,44 @@ void test("reinstalling over wrapped adversarial helpers leaves the config byte-
         );
     } finally {
         await env.cleanup();
+    }
+});
+
+void test("explains the useHttpPath side effect and needs consent before installing", async () => {
+    const notices: string[] = [];
+    const notice = (text: string) => notices.push(text);
+    const ask = (answer: boolean | null) => async () => answer;
+
+    await confirmInstall([], ask(true), notice);
+    await confirmInstall(["--yes"], ask(null), notice);
+    await assert.rejects(confirmInstall([], ask(false), notice), /cancelled/);
+    // Nobody to ask: stop and point at --yes instead of guessing.
+    await assert.rejects(confirmInstall([], ask(null), notice), /--yes/);
+    // The notice is shown every time, even when --yes skips the question.
+    assert.equal(notices.length, 4);
+    assert.equal(
+        notices.every((text) => text.includes("useHttpPath=true")),
+        true
+    );
+});
+
+void test("an install without a terminal and without --yes changes nothing", async () => {
+    const { env, install, cleanup } = await installerSandbox();
+    try {
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.helper",
+            "!previous-helper",
+        ]);
+        const configBefore = env.getAll(["--global", "--list"]);
+        const result = await install({}, []);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /useHttpPath=true/);
+        assert.match(result.stderr, /--yes/);
+        assert.deepEqual(env.getAll(["--global", "--list"]), configBefore);
+    } finally {
+        await cleanup();
     }
 });

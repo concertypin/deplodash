@@ -402,7 +402,71 @@ async function readToken(): Promise<string> {
     return promptWithoutEcho();
 }
 
+const HTTP_PATH_NOTICE = `Deplodash needs Git to tell credential helpers which repository you push, so this installer sets ${GITHUB_SECTION}.useHttpPath=true.
+That also applies to your other GitHub credential helpers (for example GCM, osxkeychain or credential-store): they will look credentials up per repository, so a login they stored for all of github.com may no longer match, and they may ask you to sign in again for each repository.
+`;
+
+/**
+ * Ask a yes/no question on the user's terminal. Resolves to null when there
+ * is no terminal to ask on (agents, CI, `curl | sh` on Windows).
+ */
+async function askOnTerminal(question: string): Promise<boolean | null> {
+    const isYes = (answer: string): boolean => /^y(es)?$/i.test(answer.trim());
+    let ttyFd: number;
+    try {
+        ttyFd = openSync("/dev/tty", "r+");
+    } catch {
+        if (!processStdin.isTTY) return null;
+        const fallback = createInterface({
+            input: processStdin,
+            output: processStdout,
+        });
+        try {
+            return isYes(await fallback.question(question));
+        } finally {
+            fallback.close();
+        }
+    }
+    const input = createReadStream("/dev/tty", { fd: ttyFd, autoClose: false });
+    const output = createWriteStream("/dev/tty", {
+        fd: ttyFd,
+        autoClose: false,
+    });
+    const prompt = createInterface({ input, output });
+    try {
+        return isYes(await prompt.question(question));
+    } finally {
+        prompt.close();
+        input.destroy();
+        output.destroy();
+        closeSync(ttyFd);
+    }
+}
+
+/**
+ * Explain the useHttpPath side effect and require consent before anything
+ * changes: an interactive "yes", or `--yes` where nobody can be asked.
+ */
+async function confirmInstall(
+    args: string[],
+    ask: (question: string) => Promise<boolean | null>,
+    writeNotice: (text: string) => void
+): Promise<void> {
+    writeNotice(HTTP_PATH_NOTICE);
+    if (args.includes("--yes") || args.includes("-y")) return;
+    const answer = await ask("Continue? [y/N] ");
+    if (answer === null)
+        throw new Error(
+            "Nothing was changed: there is no terminal to confirm on. To accept the above, rerun with --yes (for example `curl -fsSL <installer url> | sh -s -- --yes`)."
+        );
+    if (!answer)
+        throw new Error("Installation cancelled; nothing was changed.");
+}
+
 async function main(): Promise<void> {
+    await confirmInstall(process.argv.slice(2), askOnTerminal, (text) =>
+        process.stderr.write(text)
+    );
     const token = await readToken();
     if (!token) throw new Error("an agent token is required");
 
@@ -470,4 +534,9 @@ if (isEntryPoint()) {
 }
 
 export type { Git, GitResult };
-export { configureGitHubHelpers, unwrapFallback, wrappedFallbackCommand };
+export {
+    configureGitHubHelpers,
+    confirmInstall,
+    unwrapFallback,
+    wrappedFallbackCommand,
+};
