@@ -4,6 +4,7 @@ import {
     createReadStream,
     createWriteStream,
     openSync,
+    realpathSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
@@ -21,6 +22,7 @@ const installDir =
     join(homedir(), ".local", "share", "deplodash");
 const helperPath = join(installDir, "deplodash-credential-helper.ts");
 const runnerPath = join(installDir, "deplodash-credential-helper-run.mjs");
+const fallbackPath = join(installDir, "deplodash-credential-fallback.ts");
 
 type GitResult = { status: number | null; stdout: string; stderr: string };
 type Git = (args: string[]) => GitResult;
@@ -30,6 +32,7 @@ const GITHUB_SECTION = "credential.https://github.com";
 const GITHUB_HELPER_KEY = `${GITHUB_SECTION}.helper`;
 const GITHUB_USE_HTTP_PATH_KEY = `${GITHUB_SECTION}.usehttppath`;
 const DEPLODASH_MARKER = "deplodash-credential-helper";
+const FALLBACK_MARKER = "deplodash-credential-fallback";
 
 function spawnGit(args: string[]): GitResult {
     const result = spawnSync("git", args, {
@@ -96,6 +99,38 @@ function systemAndGlobalEntries(git: Git, args: string[]): ConfigEntry[] {
     return entries;
 }
 
+function shellQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function shellUnquote(token: string): string {
+    return token.replace(
+        /'([^']*)'|\\(')/g,
+        (_match, quoted?: string, escaped?: string) => quoted ?? escaped ?? ""
+    );
+}
+
+/**
+ * The credential-helper value that runs `helper` through the fallback
+ * wrapper, which keeps it from storing Deplodash installation tokens.
+ */
+function wrappedFallbackCommand(wrapperPath: string, helper: string): string {
+    return `!node ${shellQuote(wrapperPath.replaceAll("\\", "/"))} ${shellQuote(helper)}`;
+}
+
+const SHELL_QUOTED = String.raw`(?:'[^']*'|\\')+`;
+const WRAPPED_FALLBACK = new RegExp(
+    `^!node (${SHELL_QUOTED}) (${SHELL_QUOTED})$`
+);
+
+/** The original helper of a wrapped fallback entry, or `value` unchanged. */
+function unwrapFallback(value: string): string {
+    const [, wrapper, helper] = WRAPPED_FALLBACK.exec(value) ?? [];
+    return wrapper && helper && shellUnquote(wrapper).includes(FALLBACK_MARKER)
+        ? shellUnquote(helper)
+        : value;
+}
+
 /** The URL of a `credential.<url>.helper` key, or "" for `credential.helper`. */
 function credentialHelperUrl(key: string): string {
     return key === "credential.helper"
@@ -152,7 +187,9 @@ function effectiveFallbackHelpers(git: Git): {
         const coverage = githubCoverage(credentialHelperUrl(key));
         if (coverage === "narrower") narrowerKeys.push(key);
         if (coverage !== "host") continue;
-        helpers = value === "" ? [] : [...helpers, value];
+        // Fallbacks from an earlier install are wrapped; unwrap them so a
+        // reinstall wraps each original helper exactly once.
+        helpers = value === "" ? [] : [...helpers, unwrapFallback(value)];
     }
     return {
         helpers: [
@@ -172,7 +209,10 @@ function effectiveFallbackHelpers(git: Git): {
  * Apple Git) would otherwise answer first. The global github.com section is
  * rebuilt at the end of the file as: an empty value that resets the helper
  * list, the Deplodash runner, then every previously effective helper as a
- * fallback. The user's generic `credential.helper` entries are untouched.
+ * fallback, each passed through `wrapFallback` so it never stores the
+ * installation tokens Deplodash issues (Git's approve phase sends `store` to
+ * every helper). The user's generic `credential.helper` entries are
+ * untouched.
  * `useHttpPath` is required because Git only passes the repository path to
  * helpers when it is set. If a write fails, the previous section is
  * restored.
@@ -185,7 +225,8 @@ function effectiveFallbackHelpers(git: Git): {
  */
 function configureGitHubHelpers(
     git: Git,
-    runnerCommand: string
+    runnerCommand: string,
+    wrapFallback: (helper: string) => string
 ): { warnings: string[] } {
     const fallback = effectiveFallbackHelpers(git);
     const conditionalIncludes = systemAndGlobalEntries(git, [
@@ -224,7 +265,8 @@ function configureGitHubHelpers(
         }
         add(GITHUB_HELPER_KEY, "");
         add(GITHUB_HELPER_KEY, runnerCommand);
-        for (const helper of fallback.helpers) add(GITHUB_HELPER_KEY, helper);
+        for (const helper of fallback.helpers)
+            add(GITHUB_HELPER_KEY, wrapFallback(helper));
         add(GITHUB_USE_HTTP_PATH_KEY, "true");
     } catch (error: unknown) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -263,8 +305,21 @@ function configureGitHubHelpers(
     return { warnings };
 }
 
-function shellQuote(value: string): string {
-    return `'${value.replaceAll("'", "'\\''")}'`;
+/** Download a script into the install directory after a sanity check. */
+async function downloadScript(
+    name: string,
+    marker: string,
+    destination: string
+): Promise<void> {
+    const response = await fetch(`${baseUrl}/${name}`);
+    if (!response.ok)
+        throw new Error(`${name} download failed (HTTP ${response.status})`);
+    const source = await response.text();
+    // Guard against serving garbage or an unrelated payload: the script must
+    // contain its exported entry point before we persist and execute it.
+    if (!source.includes(marker))
+        throw new Error(`${name} download failed verification`);
+    await writeFile(destination, source, { mode: 0o600 });
 }
 
 async function promptWithoutEcho(): Promise<string> {
@@ -355,16 +410,16 @@ async function main(): Promise<void> {
     process.stdout.write(
         "Downloading the Deplodash Git credential helper...\n"
     );
-    const response = await fetch(`${baseUrl}/deplodash-credential-helper.ts`);
-    if (!response.ok)
-        throw new Error(`helper download failed (HTTP ${response.status})`);
-    const helperSource = await response.text();
-    // Guard against serving garbage or an unrelated payload: the helper must
-    // contain its exported entry point before we persist and execute it.
-    if (!helperSource.includes("handleCredentialRequest")) {
-        throw new Error("helper download failed verification");
-    }
-    await writeFile(helperPath, helperSource, { mode: 0o600 });
+    await downloadScript(
+        "deplodash-credential-helper.ts",
+        "handleCredentialRequest",
+        helperPath
+    );
+    await downloadScript(
+        "deplodash-credential-fallback.ts",
+        "runFallback",
+        fallbackPath
+    );
 
     const runner = `#!/usr/bin/env node\nimport { spawnSync } from "node:child_process";\nimport { fileURLToPath } from "node:url";\nimport { dirname, join } from "node:path";\nprocess.env.DEPLODASH_AGENT_TOKEN = ${JSON.stringify(token)};\nconst helper = join(dirname(fileURLToPath(import.meta.url)), "deplodash-credential-helper.ts");\nconst result = spawnSync("node", [helper, ...process.argv.slice(2)], { stdio: "inherit", env: process.env });\nprocess.exitCode = result.status ?? 1;\n`;
     const temporaryRunnerPath = `${runnerPath}.${randomUUID()}.tmp`;
@@ -379,7 +434,8 @@ async function main(): Promise<void> {
     // token) does not stack helpers that each fire a /api/token request.
     const { warnings } = configureGitHubHelpers(
         spawnGit,
-        `!node ${shellQuote(runnerPath.replaceAll("\\", "/"))}`
+        `!node ${shellQuote(runnerPath.replaceAll("\\", "/"))}`,
+        (helper) => wrappedFallbackCommand(fallbackPath, helper)
     );
     for (const warning of warnings)
         process.stderr.write(`warning: ${warning}\n`);
@@ -391,10 +447,20 @@ async function main(): Promise<void> {
     );
 }
 
-if (
-    process.argv[1] &&
-    import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+// Node resolves symlinks in the main module's URL, so compare real paths:
+// the script may be launched through a symlinked directory (e.g. macOS's
+// /var -> /private/var temp directory).
+function isEntryPoint(): boolean {
+    const entry = process.argv[1];
+    if (!entry) return false;
+    try {
+        return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+    } catch {
+        return false;
+    }
+}
+
+if (isEntryPoint()) {
     void main().catch((error: unknown) => {
         process.stderr.write(
             `${error instanceof Error ? error.message : "installation failed"}\n`
@@ -404,4 +470,4 @@ if (
 }
 
 export type { Git, GitResult };
-export { configureGitHubHelpers };
+export { configureGitHubHelpers, unwrapFallback, wrappedFallbackCommand };

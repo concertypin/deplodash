@@ -8,12 +8,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
     configureGitHubHelpers,
+    unwrapFallback,
+    wrappedFallbackCommand,
     type GitResult,
 } from "./install-credential-helper.ts";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const installerPath = join(scriptsDir, "install-credential-helper.ts");
 const githubHelperKey = "credential.https://github.com.helper";
+const fallbackWrapperPath = join(
+    scriptsDir,
+    "deplodash-credential-fallback.ts"
+);
+/** Wraps fallbacks with the real wrapper script, as the installer does. */
+const wrapFallback = (helper: string): string =>
+    wrappedFallbackCommand(fallbackWrapperPath, helper);
 
 async function runProcess(
     command: string,
@@ -100,6 +109,7 @@ async function startDeplodashServer() {
         join(scriptsDir, "deplodash-credential-helper.ts"),
         "utf8"
     );
+    const fallbackSource = await readFile(fallbackWrapperPath, "utf8");
     const state: { tokenStatus: number; tokenRequests: unknown[] } = {
         tokenStatus: 200,
         tokenRequests: [],
@@ -108,6 +118,11 @@ async function startDeplodashServer() {
         if (request.url === "/deplodash-credential-helper.ts") {
             res.writeHead(200, { "content-type": "text/plain" });
             res.end(helperSource);
+            return;
+        }
+        if (request.url === "/deplodash-credential-fallback.ts") {
+            res.writeHead(200, { "content-type": "text/plain" });
+            res.end(fallbackSource);
             return;
         }
         if (request.url === "/api/token") {
@@ -318,7 +333,11 @@ void test("honors an empty-value helper reset when collecting fallbacks", async 
             env.loggingHelper("generic"),
         ]);
 
-        configureGitHubHelpers(env.git, env.loggingHelper("deplodash"));
+        configureGitHubHelpers(
+            env.git,
+            env.loggingHelper("deplodash"),
+            wrapFallback
+        );
 
         await runProcess("git", ["credential", "fill"], {
             env: env.env,
@@ -366,7 +385,8 @@ void test("restores the previous GitHub credential section when a write fails", 
                   }
                 : env.git(args);
         assert.throws(
-            () => configureGitHubHelpers(failingGit, runnerCommand),
+            () =>
+                configureGitHubHelpers(failingGit, runnerCommand, wrapFallback),
             /settings were restored/
         );
 
@@ -407,7 +427,12 @@ void test("fails without touching the config when the old section cannot be remo
                   }
                 : env.git(args);
         assert.throws(
-            () => configureGitHubHelpers(lockedGit, "!deplodash-runner"),
+            () =>
+                configureGitHubHelpers(
+                    lockedGit,
+                    "!deplodash-runner",
+                    wrapFallback
+                ),
             (error: unknown) =>
                 error instanceof Error &&
                 error.message.includes("could not lock config file") &&
@@ -439,7 +464,8 @@ void test("tells the user how to recover when both the write and the restore fai
                 : env.git(args);
         };
         assert.throws(
-            () => configureGitHubHelpers(brokenGit, runnerCommand),
+            () =>
+                configureGitHubHelpers(brokenGit, runnerCommand, wrapFallback),
             (error: unknown) =>
                 error instanceof Error &&
                 error.message.includes("could not be restored") &&
@@ -466,8 +492,8 @@ void test("leaves sibling hosts that share the github.com prefix alone", async (
         // Installing twice is what used to duplicate the sibling's entries.
         const runnerCommand =
             "!node '/opt/deplodash-credential-helper-run.mjs'";
-        configureGitHubHelpers(env.git, runnerCommand);
-        configureGitHubHelpers(env.git, runnerCommand);
+        configureGitHubHelpers(env.git, runnerCommand, wrapFallback);
+        configureGitHubHelpers(env.git, runnerCommand, wrapFallback);
 
         assert.deepEqual(env.getAll(["--global", "--get-all", siblingKey]), [
             "!sibling",
@@ -530,7 +556,8 @@ void test("keeps every host-wide spelling of github.com as a fallback and warns 
 
         const { warnings } = configureGitHubHelpers(
             env.git,
-            env.loggingHelper("deplodash")
+            env.loggingHelper("deplodash"),
+            wrapFallback
         );
 
         await runProcess("git", ["credential", "fill"], {
@@ -573,7 +600,8 @@ void test("replaces an existing useHttpPath setting instead of duplicating it", 
 
         const { warnings } = configureGitHubHelpers(
             env.git,
-            env.loggingHelper("deplodash")
+            env.loggingHelper("deplodash"),
+            wrapFallback
         );
 
         assert.deepEqual(warnings, []);
@@ -648,7 +676,11 @@ void test("upgrades the layout written by the previous installer", async () => {
             env.loggingHelper("generic"),
         ]);
 
-        configureGitHubHelpers(env.git, env.loggingHelper("deplodash"));
+        configureGitHubHelpers(
+            env.git,
+            env.loggingHelper("deplodash"),
+            wrapFallback
+        );
 
         await runProcess("git", ["credential", "fill"], {
             env: env.env,
@@ -693,10 +725,127 @@ void test("explains that Git 2.26 is required when --show-scope is unknown", asy
                   }
                 : env.git(args);
         assert.throws(
-            () => configureGitHubHelpers(oldGit, "!deplodash-runner"),
+            () =>
+                configureGitHubHelpers(
+                    oldGit,
+                    "!deplodash-runner",
+                    wrapFallback
+                ),
             /Git 2\.26 or newer is required/
         );
         assert.deepEqual(env.getAll(["--global", "--list"]), configBefore);
+    } finally {
+        await env.cleanup();
+    }
+});
+
+void test("fallback providers never store Deplodash installation tokens but keep working", async () => {
+    const { server, env, install, cleanup } = await installerSandbox();
+    const storeLog = join(env.temp, "store.log").replaceAll("\\", "/");
+    // A persistent provider: answers `get` with the user's own credential
+    // and records everything it is asked to `store`.
+    const provider = `!f() { case "$1" in get) printf 'username=alice\npassword=personal\n' ;; store) cat >> '${storeLog}' ;; esac; true; }; f`;
+    const credential = (action: string, input: string) =>
+        runProcess("git", ["credential", action], { env: env.env, input });
+    const request = "url=https://github.com/owner/repo.git\n\n";
+    try {
+        env.configure([
+            "config",
+            "--global",
+            "--add",
+            "credential.helper",
+            provider,
+        ]);
+        const installed = await install();
+        assert.equal(installed.status, 0, installed.stderr);
+
+        // Deplodash answers first; Git then approves the token to every
+        // helper, as it does after a successful push.
+        const issued = await credential("fill", request);
+        assert.equal(issued.stdout.includes("password=ghs_test"), true);
+        const approved = await credential("approve", `${issued.stdout}\n`);
+        assert.equal(approved.status, 0, approved.stderr);
+        assert.equal(
+            (await readFile(storeLog, "utf8").catch(() => "")).includes("ghs_"),
+            false
+        );
+
+        // The user's own credentials still reach the provider.
+        await credential(
+            "approve",
+            "protocol=https\nhost=github.com\npath=owner/repo.git\nusername=alice\npassword=personal\n\n"
+        );
+        assert.equal(
+            (await readFile(storeLog, "utf8")).includes("password=personal"),
+            true
+        );
+
+        // When Deplodash cannot issue a token, the wrapped provider answers.
+        server.state.tokenStatus = 500;
+        const fallback = await credential("fill", request);
+        assert.equal(fallback.status, 0, fallback.stderr);
+        assert.equal(fallback.stdout.includes("password=personal"), true);
+    } finally {
+        await cleanup();
+    }
+});
+
+void test("unwraps only entries produced by the fallback wrapper", () => {
+    const helper = "!f() { echo 'it''s'; }; f";
+    assert.equal(unwrapFallback(wrapFallback(helper)), helper);
+    // A different install directory still unwraps.
+    assert.equal(
+        unwrapFallback(
+            wrappedFallbackCommand(
+                "/home/x/other dir/deplodash-credential-fallback.ts",
+                "manager"
+            )
+        ),
+        "manager"
+    );
+    // Plain helpers, and user helpers that merely mention the marker, stay.
+    for (const value of [
+        "manager",
+        "!node '/opt/tools/helper.mjs' 'deplodash-credential-fallback.ts'",
+        "store --file '/tmp/deplodash-credential-fallback.ts'",
+    ]) {
+        assert.equal(unwrapFallback(value), value);
+    }
+});
+
+void test("reinstalling over wrapped adversarial helpers leaves the config byte-identical", async () => {
+    const env = await isolatedGit();
+    try {
+        for (const helper of [
+            '!f() { echo "it\'s $1"; }; f',
+            "/opt/my tools/git-credential-x --flag 'a b'",
+            "'",
+        ]) {
+            env.configure([
+                "config",
+                "--global",
+                "--add",
+                "credential.helper",
+                helper,
+            ]);
+        }
+        const runner = "!node '/opt/deplodash-credential-helper-run.mjs'";
+        configureGitHubHelpers(env.git, runner, wrapFallback);
+        const first = await readFile(join(env.temp, "gitconfig"), "utf8");
+        configureGitHubHelpers(env.git, runner, wrapFallback);
+        assert.equal(
+            await readFile(join(env.temp, "gitconfig"), "utf8"),
+            first
+        );
+        // Each original helper is wrapped exactly once.
+        assert.equal(
+            env
+                .getAll(["--global", "--get-all", githubHelperKey])
+                .filter((value) =>
+                    value.includes("deplodash-credential-fallback")
+                ).length,
+            3
+        );
     } finally {
         await env.cleanup();
     }

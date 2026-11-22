@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 type CredentialHelperResult = {
@@ -299,10 +300,20 @@ async function main(): Promise<void> {
     process.exitCode = result.exitCode;
 }
 
-if (
-    process.argv[1] &&
-    import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+// Node resolves symlinks in the main module's URL, so compare real paths:
+// the script may be launched through a symlinked directory (e.g. macOS's
+// /var -> /private/var temp directory).
+function isEntryPoint(): boolean {
+    const entry = process.argv[1];
+    if (!entry) return false;
+    try {
+        return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+    } catch {
+        return false;
+    }
+}
+
+if (isEntryPoint()) {
     void main();
 }
 

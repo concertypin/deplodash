@@ -28,5 +28,6 @@ Requires Node 24+ (native TypeScript stripping, no `--experimental-strip-types` 
 
 - The helper is downloaded as a standalone file and cannot import from `src/`. It carries its own copy of the scope tables; `deplodash-credential-helper.test.ts` fails when they drift from `src/github/scopes.ts`.
 - The installer rebuilds the global `credential.https://github.com` section: an empty-value reset, the Deplodash runner, then the previously effective helpers as fallbacks, plus `useHttpPath=true` (without it Git never sends the repository path to helpers).
+- Each fallback is registered as `!node <install dir>/deplodash-credential-fallback.ts '<original helper>'`. The wrapper forwards get/store/erase through `git -c credential.helper= -c credential.helper=<original> credential ...` and drops `store` for `ghs_` installation tokens; a reinstall unwraps existing entries before wrapping them again.
 - Tests run under `node:test` via `pnpm run test:credential`, not the Workers Vitest pool.
 - Fallbacks include every host-wide spelling of github.com (`https://GitHub.com`, trailing slash, `:443`). Helpers scoped to a path or user name under github.com, and `includeIf` files, are reset by the section and only reported as warnings, never widened to all repositories. The installer needs Git 2.26+ (`git config --show-scope`).
