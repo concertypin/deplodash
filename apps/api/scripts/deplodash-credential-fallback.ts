@@ -33,11 +33,19 @@ const GIT_ACTIONS: Record<string, "fill" | "approve" | "reject"> = {
 // action ("get") to `!` helpers and `quit=1 get` is not a boolean.
 const QUIT_HELPER = "!f() { echo quit=1; }; f";
 
+/** The value of `key` in a credential description (`key=value` lines). */
+function credentialField(input: string, key: string): string | undefined {
+    for (const line of input.split(/\r?\n/)) {
+        const separator = line.indexOf("=");
+        if (separator > 0 && line.slice(0, separator) === key)
+            return line.slice(separator + 1);
+    }
+    return undefined;
+}
+
 /** GitHub App installation tokens are short-lived and never worth keeping. */
 function isInstallationToken(input: string): boolean {
-    return input
-        .split(/\r?\n/)
-        .some((line) => line.startsWith("password=ghs_"));
+    return credentialField(input, "password")?.startsWith("ghs_") ?? false;
 }
 
 function spawnGitCredential(
