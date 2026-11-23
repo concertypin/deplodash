@@ -264,6 +264,11 @@ async function handleCredentialRequest(
                         : `token scopes are narrower than requested (missing: ${missingScopes.join(", ")}); grant consent for these scopes and retry`
                 );
             }
+            // GitHub tokens are word characters only; anything else (e.g. a
+            // newline) would inject fields into Git's credential protocol.
+            if (!/^\w+$/.test(payload.token)) {
+                return failure("token request returned a malformed token");
+            }
             return {
                 stdout: `username=x-access-token\npassword=${payload.token}\n\n`,
                 stderr: "",

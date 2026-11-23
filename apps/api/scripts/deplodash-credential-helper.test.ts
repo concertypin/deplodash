@@ -374,6 +374,18 @@ void test("sends repository mode when DEPLODASH_REPO_MODE opts in", async () => 
     assert.equal(result.stdout.includes("ghs_test"), true);
 });
 
+void test("refuses a malformed token instead of injecting protocol fields", async () => {
+    const result = await getResult(async () =>
+        response(200, {
+            token: "abc\nhost=evil.example",
+            effective_scopes: SUCCESS_SCOPES,
+        })
+    );
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr.includes("malformed token"), true);
+    assert.equal(result.stderr.includes("evil.example"), false);
+});
+
 void test("rejects an invalid DEPLODASH_REPO_MODE without leaking secrets", async () => {
     const result = await getResult(
         async () => response(200, { token: "ghs_test" }),
