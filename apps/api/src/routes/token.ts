@@ -20,6 +20,7 @@ import { TokenService } from "@/token/service";
 import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { expandCompoundScopes } from "@/github/scopes";
+import { buildConsentUrl } from "@/helpers";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ const tokenResponseSchema = z.object({
     token: z.string(),
     expires_at: z.string(),
     effective_scopes: z.array(z.string()).optional(),
+    consent_url: z.string().optional(),
 });
 
 const needsConsentResponseSchema = z.object({
@@ -175,12 +177,15 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     repo
                 );
 
-                const consentUrl = `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}&agent_id=${encodeURIComponent(agentId)}&scopes=${encodeURIComponent(scopes.join(","))}&repo_mode=${encodeURIComponent(repo_mode)}`;
-
                 return c.json(
                     {
                         status: "needs_consent",
-                        url: consentUrl,
+                        url: buildConsentUrl(baseUrl, {
+                            repo,
+                            agentId,
+                            scopes,
+                            repoMode: repo_mode,
+                        }),
                         requested_scopes: scopes,
                         approved_scopes:
                             approvedScopes.length > 0
@@ -190,6 +195,23 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     202
                 );
             }
+
+            // Partial consent is intentional (the consent page supports
+            // granular selection): still issue a narrowed token, but surface
+            // a consent URL re-requesting the full scope set so clients that
+            // require it (e.g. the git credential helper) can forward it
+            // instead of looping.
+            const hasMissingScopes = scopes.some(
+                (scope) => !effectiveScopes.includes(scope)
+            );
+            const consentUrlForMissing = hasMissingScopes
+                ? buildConsentUrl(baseUrl, {
+                      repo,
+                      agentId,
+                      scopes,
+                      repoMode: repo_mode,
+                  })
+                : undefined;
 
             // Effective scopes may differ from requested if user approved only a subset
             // Check cache for the effective scopes
@@ -204,6 +226,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     token: cached.token,
                     expires_at: cached.expires_at,
                     effective_scopes: effectiveScopes,
+                    consent_url: consentUrlForMissing,
                 });
             }
 
@@ -228,15 +251,15 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                     // the stored consent only permits existing-only. Surface
                     // a fresh consent URL so the user can approve creation.
                     if (repo_mode === "create-if-missing") {
-                        const upgradeUrl =
-                            `${baseUrl}/auth/consent?repo=${encodeURIComponent(repo)}` +
-                            `&agent_id=${encodeURIComponent(agentId)}` +
-                            `&scopes=${encodeURIComponent(scopes.join(","))}` +
-                            `&repo_mode=${encodeURIComponent("create-if-missing")}`;
                         return c.json(
                             {
                                 status: "needs_consent",
-                                url: upgradeUrl,
+                                url: buildConsentUrl(baseUrl, {
+                                    repo,
+                                    agentId,
+                                    scopes,
+                                    repoMode: "create-if-missing",
+                                }),
                                 requested_scopes: scopes,
                                 approved_scopes: effectiveScopes,
                             },
@@ -268,6 +291,7 @@ export const tokenRouter = new Hono<HonoEnv>().post(
                 token: tokenResult.token,
                 expires_at: tokenResult.expires_at,
                 effective_scopes: effectiveScopes,
+                consent_url: consentUrlForMissing,
             });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -342,7 +366,10 @@ tokenRouter.on(
         }
         const tokenService = new TokenService(c.env.KV);
 
-        // First check if consent is already granted
+        // First check if consent is already granted. Any approved subset of
+        // the requested scopes counts (findConsentScopes returns the approved
+        // intersection); POST /api/token then issues a narrowed token and
+        // reports the missing scopes through `consent_url`.
         const effectiveScopes = await tokenService.findConsentScopes(
             agentId,
             repo,

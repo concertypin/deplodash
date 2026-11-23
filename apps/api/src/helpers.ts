@@ -1,3 +1,5 @@
+import type { RepositoryMode } from "@/types";
+
 // Re-export hashScopes for backward compatibility (tests import from @/helpers).
 export { hashScopes } from "@/github/scopes";
 
@@ -31,4 +33,26 @@ export function isSafeRedirect(url: string): boolean {
  */
 export function normalizeRepo(repo: string): string {
     return repo.trim().toLowerCase();
+}
+
+/**
+ * Build the consent page URL an agent forwards to the user, asking them to
+ * approve `scopes` for `repo` under `agentId`.
+ */
+export function buildConsentUrl(
+    baseUrl: string,
+    params: {
+        repo: string;
+        agentId: string;
+        scopes: string[];
+        repoMode: RepositoryMode;
+    }
+): string {
+    const origin = baseUrl.replace(/\/+$/, "");
+    return (
+        `${origin}/auth/consent?repo=${encodeURIComponent(params.repo)}` +
+        `&agent_id=${encodeURIComponent(params.agentId)}` +
+        `&scopes=${encodeURIComponent(params.scopes.join(","))}` +
+        `&repo_mode=${encodeURIComponent(params.repoMode)}`
+    );
 }

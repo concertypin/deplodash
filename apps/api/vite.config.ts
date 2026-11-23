@@ -51,7 +51,7 @@ const buildConfig: Config["build"] = {
     outDir: "dist",
     sourcemap: true,
     rolldownOptions: {
-        output: { inlineDynamicImports: true, codeSplitting: false },
+        output: { codeSplitting: false },
     },
 };
 

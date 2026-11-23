@@ -101,18 +101,18 @@ Uses the session cookie created by the login flow and returns the user OAuth tok
 
 ## Git Credential Helper
 
-### HTTPS with credential helper (persistent)
+### HTTPS credential helper for git push
+
+Install the helper (Node 24 and Git 2.26 or newer) and configure Git in one command:
 
 ```sh
-# Set remote to HTTPS (not SSH)
-git remote set-url origin https://github.com/owner/repo.git
-
-# Configure credential helper to fetch tokens from deplodash
-git config credential.helper "!f() {
-  echo username=x-access-token
-  echo password=$(curl -s -X POST {{BASE}}/api/token     -H 'Authorization: Bearer YOUR_AGENT_TOKEN'     -H 'Content-Type: application/json'     -d '{\"repo\":\"owner/repo\",\"scopes\":[\"contents:write\"]}'     | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
-}; f"
+curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh
 ```
+
+Before changing anything it explains the `useHttpPath` side effect below and asks you to confirm. Where it cannot ask (an agent VM, CI, or `curl | sh` on Windows), it stops without changes; rerun with `--yes` to accept: `curl -fsSL https://raw.githubusercontent.com/concertypin/deplodash/main/apps/api/scripts/install-credential-helper.sh | sh -s -- --yes`.
+
+The installer prompts for the long-lived agent token, stores it in a private runner under `~/.local/share/deplodash` rather than Git configuration, and registers the helper for `https://github.com` ahead of every existing credential provider, including system-level ones such as GCM or osxkeychain, which remain usable as fallback after it. It sets `credential.https://github.com.useHttpPath=true`, because Git only tells credential helpers which repository is being accessed when this is set. Use an HTTPS GitHub remote such as `https://github.com/owner/repo.git`. Because Git does not tell credential helpers which ref is being pushed, the default request conservatively includes both `contents:write` and `workflows:write`; set `DEPLODASH_SCOPES` for an explicit narrower scope set, and `DEPLODASH_REPO_MODE=create-if-missing` to opt in to automatic repository creation. When the helper cannot produce a token it prints a diagnostic (including the consent URL when approval is pending) to stderr and returns nothing, so Git falls through to other credential providers; approve the consent URL, then retry `git push`. Note that Git's approve phase sends the issued token to every configured helper; the installer registers each fallback provider through a small wrapper (`deplodash-credential-fallback.ts`) that runs it exactly as Git would but drops that `store` request for GitHub App installation tokens (`ghs_…`), so fallback providers never cache the short-lived Deplodash token. A credential helper configured in a single repository's own `.git/config` is not wrapped and could still store it; per-repository helpers are rare, so the installer leaves repository config alone.
+On Windows (no POSIX `/dev/tty`), set `DEPLODASH_AGENT_TOKEN` before running the installer to avoid a visible-input prompt.
 
 ## Permissions
 

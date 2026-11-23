@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach, assert } from "vitest";
 import { render } from "vitest-browser-svelte";
 import ConsentPage from "@/lib/ConsentPage.svelte";
+import { approvableScopeIds } from "@/lib/scopes";
+
+const totalApprovableScopes = approvableScopeIds.size;
 
 function mockFetchOnce(data: Record<string, unknown>, status = 200) {
     return Promise.resolve(
@@ -73,6 +76,14 @@ describe("ConsentPage — direct consent parameters", () => {
                 })
             )
             .toBeVisible();
+        // Mode-exclusive footer: exactly the create action plus Cancel, with
+        // no Grant Access action for a create-if-missing request.
+        await expect
+            .element(screen.getByRole("button", { name: "Cancel" }))
+            .toBeVisible();
+        await expect
+            .element(screen.getByRole("button", { name: "Grant Access" }))
+            .not.toBeInTheDocument();
     });
 
     it("posts direct consent parameters for an existing repository", async () => {
@@ -109,6 +120,14 @@ describe("ConsentPage — direct consent parameters", () => {
         await expect
             .element(screen.getByText("Authorization Required"))
             .toBeVisible();
+        // Mode-exclusive footer for an existing repository: no create action.
+        await expect
+            .element(
+                screen.getByRole("button", {
+                    name: "Create private repo & allow",
+                })
+            )
+            .not.toBeInTheDocument();
         await screen.getByRole("button", { name: "Grant Access" }).click();
 
         await vi.waitFor(() => {
@@ -206,5 +225,21 @@ describe("ConsentPage — direct consent parameters", () => {
         });
         await expect.element(workflowsWrite).toBeVisible();
         await expect.element(workflowsWrite).toBeChecked();
+        // The preset also expands into metadata:read, rendered under its own
+        // requested category legend and checked by default.
+        const metadataRead = screen.getByRole("checkbox", {
+            name: /metadata:read/,
+        });
+        await expect.element(metadataRead).toBeVisible();
+        await expect.element(metadataRead).toBeChecked();
+        // The remaining approvable scopes (29 minus the three expanded by the
+        // preset) are folded into the closed additional-permissions disclosure.
+        await expect
+            .element(
+                screen.getByText(
+                    `Additional permissions (${totalApprovableScopes - 3})`
+                )
+            )
+            .toBeVisible();
     });
 });
