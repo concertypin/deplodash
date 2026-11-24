@@ -80,6 +80,8 @@ export type AppVariables = {
     client?: GitHubClient;
     /** Agent ID extracted from bearer token (v2). */
     agent_id?: string;
+    /** The verified agent token and its record (set by agentAuthMiddleware). */
+    agent?: { token: string; info: AgentInfo };
 };
 
 export type HonoEnv = {
@@ -125,7 +127,12 @@ export type AgentInfo = {
     agent_id: string;
     label: string;
     created_at: string;
+    /** GitHub login of the owner (renameable — display/ownership checks only). */
     created_by?: string;
+    /** Numeric GitHub user id of the owner (immutable). */
+    created_by_id?: number;
+    /** Random immutable uid; the OIDC `sub` is `agent:<uid>`. */
+    uid?: string;
 };
 
 /**

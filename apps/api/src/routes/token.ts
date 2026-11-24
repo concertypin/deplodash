@@ -21,6 +21,8 @@ import { GitHubApp } from "@/github/app";
 import { addWaiter } from "@/token/wait-notifier";
 import { expandCompoundScopes } from "@/github/scopes";
 import { buildConsentUrl } from "@/helpers";
+import { isRateLimited } from "@/rate-limit";
+import { waitForApproval } from "@/token/long-poll";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -145,21 +147,8 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const agentId = c.get("agent_id")!;
 
             // Rate limiting — per-agent throttle to protect GitHub API quota
-            const rateLimiter = c.env.TOKEN_RATE_LIMITER;
-            if (rateLimiter) {
-                try {
-                    const { success } = await rateLimiter.limit({
-                        key: agentId,
-                    });
-                    if (!success) {
-                        return c.json(
-                            { error: "Rate limited. Try again later." },
-                            429
-                        );
-                    }
-                } catch {
-                    // Rate limiter unavailable (e.g., local dev) — proceed
-                }
+            if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, agentId)) {
+                return c.json({ error: "Rate limited. Try again later." }, 429);
             }
 
             // Determine base URL for consent redirect
@@ -348,21 +337,8 @@ tokenRouter.on(
         const { repo, scopes } = c.req.valid("json");
         const agentId = c.get("agent_id")!;
         // Rate limiting — per-agent throttle
-        const rateLimiter = c.env.TOKEN_RATE_LIMITER;
-        if (rateLimiter) {
-            try {
-                const { success } = await rateLimiter.limit({
-                    key: agentId,
-                });
-                if (!success) {
-                    return c.json(
-                        { error: "Rate limited. Try again later." },
-                        429
-                    );
-                }
-            } catch {
-                // Rate limiter unavailable (e.g., local dev) — proceed
-            }
+        if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, agentId)) {
+            return c.json({ error: "Rate limited. Try again later." }, 429);
         }
         const tokenService = new TokenService(c.env.KV);
 
@@ -380,91 +356,18 @@ tokenRouter.on(
         }
 
         // Wait for up to 1 minute 30 seconds (90s)
-        const TIMEOUT_MS = 90 * 1000;
-        const POLL_INTERVAL_MS = 5000;
-
-        return new Promise<Response>((resolve) => {
-            let finished = false;
-
-            // 1. Setup in-isolate module-level Map for instant notification
-            const removeWaiter = addWaiter(repo, agentId, () => {
-                void (async () => {
-                    try {
-                        // Double check with KV to be sure
-                        const currentScopes =
-                            await tokenService.findConsentScopes(
-                                agentId,
-                                repo,
-                                scopes
-                            );
-                        if (currentScopes) {
-                            finishWithSuccess();
-                        }
-                    } catch (e) {
-                        console.error("Error in wait-notifier listener", e);
-                    }
-                })();
-            });
-
-            const timeoutId = setTimeout(() => {
-                finishWithTimeout();
-            }, TIMEOUT_MS);
-
-            const pollIntervalId = setInterval(() => {
-                void (async () => {
-                    try {
-                        const currentScopes =
-                            await tokenService.findConsentScopes(
-                                agentId,
-                                repo,
-                                scopes
-                            );
-                        if (currentScopes) {
-                            finishWithSuccess();
-                        }
-                    } catch (e) {
-                        console.error("Error polling for consent", e);
-                    }
-                })();
-            }, POLL_INTERVAL_MS);
-
-            const cleanup = () => {
-                if (finished) return;
-                finished = true;
-
-                clearTimeout(timeoutId);
-                clearInterval(pollIntervalId);
-                removeWaiter();
-
-                if (c.req.raw.signal) {
-                    c.req.raw.signal.removeEventListener("abort", onAbort);
-                }
-            };
-
-            const finishWithSuccess = () => {
-                cleanup();
-                resolve(new Response(null, { status: 204 }));
-            };
-
-            const finishWithTimeout = () => {
-                cleanup();
-                resolve(
-                    c.json(
-                        { error: "Timeout waiting for consent approval" },
-                        403
-                    )
-                );
-            };
-
-            const onAbort = () => {
-                cleanup();
-                resolve(new Response(null, { status: 499 }));
-            };
-
-            // Cloudflare Workers specific: Ensure the promise resolves if the client disconnects
-            if (c.req.raw.signal) {
-                c.req.raw.signal.addEventListener("abort", onAbort);
-            }
+        const outcome = await waitForApproval({
+            check: async () =>
+                (await tokenService.findConsentScopes(
+                    agentId,
+                    repo,
+                    scopes
+                )) !== null,
+            subscribe: (onNotify) => addWaiter(repo, agentId, onNotify),
+            signal: c.req.raw.signal,
         });
+        if (outcome === "approved") return new Response(null, { status: 204 });
+        if (outcome === "aborted") return new Response(null, { status: 499 });
+        return c.json({ error: "Timeout waiting for consent approval" }, 403);
     }
 );

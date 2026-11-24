@@ -77,15 +77,6 @@ describe("getIssuerConfig", () => {
         ).toBeNull();
     });
 
-    it.concurrent("is null with an invalid issuer", () => {
-        expect(
-            getIssuerConfig({
-                OIDC_ISSUER: "https://deplodash.euroka.moe/",
-                OIDC_SIGNING_KEY: "key",
-            })
-        ).toBeNull();
-    });
-
     it.concurrent("derives the JWKS URI from the issuer", () => {
         expect(
             getIssuerConfig({

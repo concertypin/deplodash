@@ -95,6 +95,56 @@ Content-Type: application/json
 - `403 Forbidden`
 - If the user does not grant consent within 1 minute 30 seconds, the request will time out with a `403` status code.
 
+### POST /api/oidc/token — Request an OIDC identity token (Google Cloud)
+
+Deplodash is an OIDC issuer (`https://deplodash.euroka.moe`). Your owner can let you mint short-lived ID tokens for a Google Cloud Workload Identity Federation provider, which you then exchange for Google Cloud credentials. No service account key is involved.
+
+**Request:**
+
+```json
+POST /api/oidc/token
+Authorization: Bearer <agent_token>
+Content-Type: application/json
+
+{
+    "audience": "https://iam.googleapis.com/projects/<project-number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>"
+}
+```
+
+`audience` must be a GCP Workload Identity provider. The `//iam.googleapis.com/...` spelling is accepted too, and the token's `aud` is always the `https:` form. Other audiences return `400`.
+
+**Response (ok):**
+
+```json
+{
+    "status": "ok",
+    "id_token": "<JWT>",
+    "token_type": "urn:ietf:params:oauth:token-type:id_token",
+    "expires_at": "2026-11-24T12:10:00.000Z",
+    "subject": "agent:<uid>"
+}
+```
+
+The token is valid for 10 minutes. Request a new one for every exchange; do not cache or reuse it.
+
+**Response (needs consent):** `202` with `{ "status": "needs_consent", "url": "...", "subject": "agent:<uid>" }`. Show the URL to your owner; only the owner of your agent token can approve it. Then wait with `QUERY /api/oidc/wait` (same headers and body, `204` on approval, `403` after 1 minute 30 seconds) and call `POST /api/oidc/token` again.
+
+**Exchange it for Google Cloud credentials** (Security Token Service):
+
+```sh
+curl -sS https://sts.googleapis.com/v1/token \
+  -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+  -d audience=//iam.googleapis.com/projects/<project-number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> \
+  -d scope=https://www.googleapis.com/auth/cloud-platform \
+  -d requested_token_type=urn:ietf:params:oauth:token-type:access_token \
+  -d subject_token_type=urn:ietf:params:oauth:token-type:id_token \
+  -d subject_token="$ID_TOKEN"
+```
+
+The returned federated access token works directly for resources granted to your `principal://…/subject/agent:<uid>`. If your owner set up service account impersonation instead, call `POST https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/<email>:generateAccessToken` with it.
+
+Claims: `iss`, `sub` (`agent:<uid>`, stable for the life of your agent token), `aud`, `iat`, `nbf`, `exp`, `jti`, `agent_id`, and `owner_github_id` when known. Only `sub` identifies you: `agent_id` is not unique across Deplodash users.
+
 ### GET /api/user/token — Return the signed-in user OAuth token
 
 Uses the session cookie created by the login flow and returns the user OAuth token for browser-driven operations.

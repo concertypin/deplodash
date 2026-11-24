@@ -15,7 +15,8 @@ repository, deplodash creates it automatically.
 
 - **Monorepo** (pnpm workspace) with `apps/api` and `apps/web`
 - **`apps/api/src/`** — Backend application (Hono on Cloudflare Workers)
-    - **`routes/`** — Route handlers (token, consent, auth, oauth, llms, user)
+    - **`routes/`** — Route handlers (token, oidc, consent, auth, oauth, llms, user, well-known)
+    - **`oidc/`** — OIDC issuer: signing key/JWKS, audience validation, identity tokens, OIDC consent
     - **`middleware/`** — Session cookie auth, Bearer token auth for agents
     - Core modules: `crypto.ts`, `github-app.ts`, `github.ts`, `token/service.ts`, `helpers.ts`, `types.ts`, `errors.ts`
 - **`apps/web/src/`** — Frontend application (Svelte 5 SPA with Hono RPC)
@@ -23,7 +24,7 @@ repository, deplodash creates it automatically.
     - **`lib/HomePage.svelte`** — Dashboard / Login page
     - **`lib/ConsentPage.svelte`** — OAuth consent grant page
     - **`App.svelte`** — Simple rune-based SPA router for `/` and `/auth/consent`
-- **`tests/`** — Vitest test suite (245 tests, 90%+ coverage)
+- **`tests/`** — Vitest test suite (90%+ coverage)
 
 ## Environment Variables
 
