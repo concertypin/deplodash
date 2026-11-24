@@ -111,7 +111,7 @@ Content-Type: application/json
 }
 ```
 
-`audience` must be a GCP Workload Identity provider. The `//iam.googleapis.com/...` spelling is accepted too, and the token's `aud` is always the `https:` form. Other audiences return `400`.
+`audience` must be a GCP Workload Identity provider, in the `https://iam.googleapis.com/...` or `//iam.googleapis.com/...` spelling. The token's `aud` is exactly the string you sent; both spellings share one approval. Other audiences return `400`.
 
 **Response (ok):**
 
@@ -128,6 +128,8 @@ Content-Type: application/json
 The token is valid for 10 minutes. Request a new one for every exchange; do not cache or reuse it.
 
 **Response (needs consent):** `202` with `{ "status": "needs_consent", "url": "...", "subject": "agent:<uid>" }`. Show the URL to your owner; only the owner of your agent token can approve it. Then wait with `QUERY /api/oidc/wait` (same headers and body, `204` on approval, `403` after 1 minute 30 seconds) and call `POST /api/oidc/token` again.
+
+**Other responses** (both endpoints): `409` if your agent token was created before OIDC support (ask your owner for a new token), `429` when rate limited, `503` when the issuer is not configured. `QUERY /api/oidc/wait` returns `499` if you disconnect.
 
 **Exchange it for Google Cloud credentials** (Security Token Service):
 

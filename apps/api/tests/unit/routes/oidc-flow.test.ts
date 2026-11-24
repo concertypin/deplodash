@@ -17,11 +17,9 @@ import { parseAudience } from "@/oidc/audience";
 import { resetOidcSignerCache } from "@/oidc/signer";
 import { RS256_ALGORITHM } from "@/oidc/jwk";
 import {
-    ensureAgentUid,
     findAgentByUid,
     registerAgentToken,
     revokeAgentToken,
-    setAgentOwnerId,
     verifyAgentToken,
 } from "@/middleware/agent-auth";
 import { clearKV, generateTestKeyPair, makeBaseEnv } from "@tests/helpers";
@@ -298,7 +296,10 @@ describe("POST /api/oidc/token", () => {
         expect((await requestToken(agent, other)).status).toBe(202);
     });
 
-    it("assigns a stable uid to agents created before uids existed", async () => {
+    it("rejects agents created before OIDC support and never rewrites them", async () => {
+        // Rewriting agent_tokens:* from a request could resurrect a token
+        // revoked at another location (KV caches reads for ~60 s), and a
+        // backfilled uid could differ per location. Legacy agents get 409.
         const token = "legacy-token";
         await env.KV.put(
             `agent_tokens:${token}`,
@@ -309,28 +310,29 @@ describe("POST /api/oidc/token", () => {
                 created_by: OWNER.login,
             })
         );
-        const first = needsConsentSchema.parse(
-            await (await requestToken(token)).json()
-        );
-        const second = needsConsentSchema.parse(
-            await (await requestToken(token)).json()
-        );
-        expect(first.subject).toMatch(/^agent:[A-Za-z0-9_-]{22}$/);
-        expect(second.subject).toBe(first.subject);
-        expect(`agent:${await uidOf(token)}`).toBe(first.subject);
+        const before = await env.KV.get(`agent_tokens:${token}`);
 
-        // The backfilled uid must be approvable end to end (uid index).
-        const uid = new URL(first.url).searchParams.get("agent_uid");
-        assert(uid);
-        expect(
-            (
-                await postConsent("/api/consent/oidc", {
-                    agent_uid: uid,
-                    audience: AUDIENCE,
-                })
-            ).status
-        ).toBe(200);
-        expect((await requestToken(token)).status).toBe(200);
+        const res = await requestToken(token);
+        expect(res.status).toBe(409);
+        expect(errorSchema.parse(await res.json()).error).toMatch(
+            /predates OIDC support/
+        );
+        const waitRes = await router.request(
+            "/api/oidc/wait",
+            {
+                method: "QUERY",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ audience: AUDIENCE }),
+            },
+            testEnv()
+        );
+        expect(waitRes.status).toBe(409);
+
+        expect(await env.KV.get(`agent_tokens:${token}`)).toBe(before);
+        expect((await env.KV.list({ prefix: "agent_uid:" })).keys).toEqual([]);
     });
 
     it("rejects a revoked agent token even if its consent records remain", async () => {
@@ -467,22 +469,19 @@ describe("POST /api/consent/oidc", () => {
         expect(res.status).toBe(400);
     });
 
-    it("records the owner's GitHub id on agents that lack it", async () => {
-        const agent = await createAgent("no-id", null);
-        // Owner known by login only, as in records created before ids were stored.
-        const info = await verifyAgentToken(env.KV, agent);
-        assert(info);
-        await env.KV.put(
-            `agent_tokens:${agent}`,
-            JSON.stringify({ ...info, created_by: OWNER.login })
-        );
-        await postConsent("/api/consent/oidc", {
-            agent_uid: await uidOf(agent),
-            audience: AUDIENCE,
-        });
-        expect((await verifyAgentToken(env.KV, agent))?.created_by_id).toBe(
-            OWNER.id
-        );
+    it("never rewrites the agent token record when consent is granted", async () => {
+        const agent = await createAgent();
+        const before = await env.KV.get(`agent_tokens:${agent}`);
+        expect(
+            (
+                await postConsent("/api/consent/oidc", {
+                    agent_uid: await uidOf(agent),
+                    audience: AUDIENCE,
+                })
+            ).status
+        ).toBe(200);
+        expect((await requestToken(agent)).status).toBe(200);
+        expect(await env.KV.get(`agent_tokens:${agent}`)).toBe(before);
     });
 
     it("revoking consent makes the agent ask again", async () => {
@@ -659,7 +658,7 @@ describe("user routes", () => {
         expect(body.info.oidc_subject).toBe(`agent:${info?.uid}`);
     });
 
-    it("lists each agent's OIDC subject, assigning uids to legacy agents", async () => {
+    it("lists agents created before OIDC support without a subject", async () => {
         await env.KV.put(
             "agent_tokens:legacy-list",
             JSON.stringify({
@@ -669,28 +668,16 @@ describe("user routes", () => {
                 created_by: OWNER.login,
             })
         );
+        const before = await env.KV.get("agent_tokens:legacy-list");
         const res = await userRequest("/api/user/agent/list");
         const { tokens } = z
             .object({
-                tokens: z.array(
-                    z.object({ agent_id: z.string(), oidc_subject: z.string() })
-                ),
+                tokens: z.array(z.looseObject({ agent_id: z.string() })),
             })
             .parse(await res.json());
         expect(tokens).toHaveLength(1);
-        expect(tokens[0]!.oidc_subject).toBe(
-            `agent:${await uidOf("legacy-list")}`
-        );
-
-        // A uid assigned by the dashboard backfill is approvable too.
-        expect(
-            (
-                await postConsent("/api/consent/oidc", {
-                    agent_uid: await uidOf("legacy-list"),
-                    audience: AUDIENCE,
-                })
-            ).status
-        ).toBe(200);
+        expect(tokens[0]).not.toHaveProperty("oidc_subject");
+        expect(await env.KV.get("agent_tokens:legacy-list")).toBe(before);
     });
 
     it("lists only the user's own agents' OIDC consents", async () => {
@@ -855,15 +842,17 @@ describe("agent ownership", () => {
         ).toBe(200);
     });
 
-    it("compares logins for legacy records without an owner id", async () => {
-        const agent = await createAgent("legacy-owner", null);
+    it("requires a recorded owner id, even when the login matches", async () => {
+        // A record with a uid but only a login (e.g. written by hand or by
+        // an old CLI) is not trusted for OIDC: a freed login can be
+        // re-registered by someone else.
+        const agent = await createAgent("login-only", null);
         const info = await verifyAgentToken(env.KV, agent);
         assert(info);
         await env.KV.put(
             `agent_tokens:${agent}`,
             JSON.stringify({ ...info, created_by: OWNER.login })
         );
-        currentUser = { login: "other", id: 5 };
         expect(
             (
                 await postConsent("/api/consent/oidc", {
@@ -872,6 +861,9 @@ describe("agent ownership", () => {
                 })
             ).status
         ).toBe(403);
+        expect(
+            (await verifyAgentToken(env.KV, agent))?.created_by_id
+        ).toBeUndefined();
     });
 
     it("applies the id-over-login rule on every dashboard route", async () => {
@@ -960,14 +952,6 @@ describe("agent ownership", () => {
         expect((await requestToken(agent)).status).toBe(202);
     });
 
-    it("setAgentOwnerId never replaces a recorded id", async () => {
-        const agent = await createAgent("owned", OWNER);
-        await setAgentOwnerId(env.KV, agent, 999);
-        expect((await verifyAgentToken(env.KV, agent))?.created_by_id).toBe(
-            OWNER.id
-        );
-    });
-
     it("accepts a same-origin request without an Origin header", async () => {
         // Same as the repository consent route: a missing Origin is allowed
         // because the JSON validator and SameSite=Strict cookies already stop
@@ -1008,7 +992,8 @@ describe("agent ownership", () => {
                 })
             );
             expect(res.status).toBe(429);
-            expect(keys).toEqual(["203.0.113.7"]);
+            // Namespaced so it cannot collide with oidc:<uid> or repo keys.
+            expect(keys).toEqual(["ip:203.0.113.7"]);
         }
     );
 
@@ -1020,50 +1005,17 @@ describe("agent ownership", () => {
         });
         const res = await requestToken(agent, AUDIENCE.replace(/^https:/, ""));
         expect(res.status).toBe(200);
-        // The signed aud is always the canonical https: form GCP expects.
+        // The signed aud keeps the requested spelling: Google matches an
+        // explicit allowed-audiences list literally.
         const payload = okSchema.parse(await res.json()).id_token.split(".")[1];
         assert(payload);
-        expect(decodeJson(payload)).toMatchObject({ aud: AUDIENCE });
+        expect(decodeJson(payload)).toMatchObject({
+            aud: AUDIENCE.replace(/^https:/, ""),
+        });
     });
 });
 
 describe("agent uid records", () => {
-    it("does not resurrect a token revoked while a uid backfill was in flight", async () => {
-        const token = "legacy-revoked";
-        const legacy = {
-            agent_id: "legacy",
-            label: "legacy",
-            created_at: "2026-01-01T00:00:00.000Z",
-            created_by: OWNER.login,
-        };
-        await env.KV.put(`agent_tokens:${token}`, JSON.stringify(legacy));
-        const stale = await verifyAgentToken(env.KV, token);
-        assert(stale);
-        await revokeAgentToken(env.KV, token);
-
-        await expect(ensureAgentUid(env.KV, token, stale)).rejects.toThrow(
-            /no longer exists/
-        );
-        expect(await verifyAgentToken(env.KV, token)).toBeNull();
-    });
-
-    it("keeps a uid another request already stored", async () => {
-        const token = "legacy-race";
-        await env.KV.put(
-            `agent_tokens:${token}`,
-            JSON.stringify({
-                agent_id: "legacy",
-                label: "legacy",
-                created_at: "2026-01-01T00:00:00.000Z",
-            })
-        );
-        const stale = await verifyAgentToken(env.KV, token);
-        assert(stale && !stale.uid);
-        const first = await ensureAgentUid(env.KV, token, stale);
-        // A second caller still holding the uid-less copy must not replace it.
-        expect(await ensureAgentUid(env.KV, token, stale)).toBe(first);
-    });
-
     it("ignores a uid index that outlived its token", async () => {
         const agent = await createAgent();
         const uid = await uidOf(agent);
@@ -1118,5 +1070,73 @@ describe("QUERY /api/oidc/wait (client disconnect)", () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
         controller.abort();
         expect((await pending).status).toBe(499);
+    });
+});
+
+describe("GET /api/consent/oidc/agent", () => {
+    function lookup(agentUid: string) {
+        return router.request(
+            `http://localhost/api/consent/oidc/agent?agent_uid=${agentUid}`,
+            {},
+            testEnv()
+        );
+    }
+
+    it("returns the owner's agent by uid", async () => {
+        const agent = await createAgent("looked-up");
+        const res = await lookup(await uidOf(agent));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({
+            agent_id: "looked-up",
+            label: "looked-up",
+        });
+    });
+
+    it("answers a foreign uid exactly like an unknown one", async () => {
+        const agent = await createAgent("theirs", { login: "someone", id: 5 });
+        const foreign = await lookup(await uidOf(agent));
+        const unknown = await lookup("zzzzzzzzzzzzzzzzzzzzzz");
+        expect(foreign.status).toBe(403);
+        expect(unknown.status).toBe(403);
+        expect(await foreign.json()).toEqual(await unknown.json());
+    });
+
+    it("rejects a malformed uid", async () => {
+        expect((await lookup("short")).status).toBe(400);
+    });
+});
+
+describe("rate-limit key namespaces", () => {
+    it("keeps a repo token agent_id from sharing an agent's OIDC bucket", async () => {
+        const victim = await createAgent("victim");
+        const victimUid = await uidOf(victim);
+        // An attacker names their agent after the victim's OIDC bucket.
+        const attacker = await createAgent(`oidc:${victimUid}`, {
+            login: "attacker",
+            id: 666,
+        });
+        const keys: string[] = [];
+        const environment = testEnv({
+            TOKEN_RATE_LIMITER: {
+                limit: ({ key }: { key: string }) => {
+                    keys.push(key);
+                    return Promise.resolve({ success: false });
+                },
+            },
+        });
+        await router.request(
+            "/api/token",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${attacker}`,
+                },
+                body: JSON.stringify({ repo: "attacker/repo" }),
+            },
+            environment
+        );
+        await requestToken(victim, AUDIENCE, environment);
+        expect(keys).toEqual([`repo:oidc:${victimUid}`, `oidc:${victimUid}`]);
     });
 });

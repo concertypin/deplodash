@@ -147,7 +147,9 @@ export const tokenRouter = new Hono<HonoEnv>().post(
             const agentId = c.get("agent_id")!;
 
             // Rate limiting — per-agent throttle to protect GitHub API quota
-            if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, agentId)) {
+            if (
+                await isRateLimited(c.env.TOKEN_RATE_LIMITER, `repo:${agentId}`)
+            ) {
                 return c.json({ error: "Rate limited. Try again later." }, 429);
             }
 
@@ -337,7 +339,7 @@ tokenRouter.on(
         const { repo, scopes } = c.req.valid("json");
         const agentId = c.get("agent_id")!;
         // Rate limiting — per-agent throttle
-        if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, agentId)) {
+        if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, `repo:${agentId}`)) {
             return c.json({ error: "Rate limited. Try again later." }, 429);
         }
         const tokenService = new TokenService(c.env.KV);

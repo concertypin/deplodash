@@ -1,6 +1,5 @@
 import {
     deleteAgentUidIndex,
-    ensureAgentUid,
     isAgentOwner,
     listAgentTokens,
     registerAgentToken,
@@ -113,19 +112,15 @@ export const userRouter = new Hono<HonoEnv>()
         const allTokens = await listAgentTokens(c.env.KV);
         const userTokens = allTokens.filter((t) => isAgentOwner(t.info, user));
 
-        // Assign uids to agents created before they existed, so the owner
-        // can configure a relying party before the agent's first request.
-        const tokens = [];
-        for (const t of userTokens) {
-            const uid = await ensureAgentUid(c.env.KV, t.token, t.info);
-            tokens.push({
-                token: t.token,
-                agent_id: t.info.agent_id,
-                label: t.info.label,
-                created_at: t.info.created_at,
-                oidc_subject: agentSubject(uid),
-            });
-        }
+        // Agents created before OIDC support have no uid and never get one
+        // at runtime (see isOidcOwner), so they have no OIDC subject.
+        const tokens = userTokens.map((t) => ({
+            token: t.token,
+            agent_id: t.info.agent_id,
+            label: t.info.label,
+            created_at: t.info.created_at,
+            ...(t.info.uid ? { oidc_subject: agentSubject(t.info.uid) } : {}),
+        }));
 
         return c.json({ status: "ok", tokens });
     })

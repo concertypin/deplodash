@@ -5,6 +5,7 @@
  * POST /api/consent/revoke   — revoke consent for an agent
  * POST /api/consent/oidc        — let an agent mint OIDC tokens for an audience
  * POST /api/consent/oidc/revoke — withdraw that permission
+ * GET  /api/consent/oidc/agent   — the signed-in user's agent for a uid (consent page)
  *
  * Both endpoints require a valid session cookie and return JSON.
  */
@@ -21,11 +22,7 @@ import { ConsentOwnershipError } from "@/errors";
 import { notifyWaiters } from "@/token/wait-notifier";
 import { APPROVABLE_SCOPES, expandCompoundScopes } from "@/github/scopes";
 import { isRateLimited } from "@/rate-limit";
-import {
-    findAgentByUid,
-    isAgentOwner,
-    setAgentOwnerId,
-} from "@/middleware/agent-auth";
+import { findAgentByUid, isOidcOwner } from "@/middleware/agent-auth";
 import { parseAudience } from "@/oidc/audience";
 import { OidcConsentService, oidcWaiterKey } from "@/oidc/consent";
 
@@ -51,10 +48,16 @@ const revokeSchema = z.object({
     agent_id: z.string().min(1).optional(),
 });
 
+const agentUidSchema = z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{22}$/, "Invalid agent uid");
+
 const oidcConsentSchema = z.object({
-    agent_uid: z.string().regex(/^[A-Za-z0-9_-]{22}$/, "Invalid agent uid"),
+    agent_uid: agentUidSchema,
     audience: z.string().min(1).max(512),
 });
+
+const oidcAgentQuerySchema = z.object({ agent_uid: agentUidSchema });
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api/consent — relative paths
@@ -97,7 +100,7 @@ export const consentRouter = new Hono<HonoEnv>()
         if (
             await isRateLimited(
                 c.env.TOKEN_RATE_LIMITER,
-                c.req.header("CF-Connecting-IP") || "unknown"
+                `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
             )
         ) {
             return c.json({ error: "Rate limited. Try again later." }, 429);
@@ -235,7 +238,7 @@ export const consentRouter = new Hono<HonoEnv>()
             if (
                 await isRateLimited(
                     c.env.TOKEN_RATE_LIMITER,
-                    c.req.header("CF-Connecting-IP") || "unknown"
+                    `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
                 )
             ) {
                 return c.json({ error: "Rate limited. Try again later." }, 429);
@@ -295,7 +298,6 @@ export const consentRouter = new Hono<HonoEnv>()
 
             const agentUid = agent.info.uid!;
             try {
-                await setAgentOwnerId(c.env.KV, agent.token, user.id);
                 await new OidcConsentService(c.env.KV).grant({
                     agentId: agent.info.agent_id,
                     agentUid,
@@ -328,7 +330,52 @@ export const consentRouter = new Hono<HonoEnv>()
             }
             return c.json({ status: "ok" });
         }
+    )
+    .get(
+        "/oidc/agent",
+        authGuard(),
+        validator("query", oidcAgentQuerySchema),
+        async (c) => {
+            // A direct uid lookup: the consent page must not depend on the
+            // eventually consistent, full-scan agent list.
+            const owned = await resolveOwnedOidcAgent(
+                c,
+                c.req.valid("query").agent_uid
+            );
+            if (owned instanceof Response) return owned;
+            const { info } = owned.agent;
+            return c.json({ agent_id: info.agent_id, label: info.label });
+        }
     );
+
+const NOT_OWNER = {
+    error: "Only the agent's owner can change its OIDC access",
+};
+
+/**
+ * Resolve `agentUid` to an agent the signed-in user may manage OIDC access
+ * for. Unknown and foreign uids get the same 403, so uids of other users'
+ * agents cannot be probed.
+ */
+async function resolveOwnedOidcAgent(
+    c: Context<HonoEnv>,
+    agentUid: string
+): Promise<
+    Response | { agent: { token: string; info: AgentInfo }; user: GitHubUser }
+> {
+    let user: GitHubUser;
+    try {
+        user = await c.get("client")!.getUser();
+    } catch {
+        return c.json(
+            { error: "Failed to verify identity. Please try again." },
+            401
+        );
+    }
+    const agent = await findAgentByUid(c.env.KV, agentUid);
+    if (!agent || !isOidcOwner(agent.info, user)) return c.json(NOT_OWNER, 403);
+    return { agent, user };
+}
 
 /**
  * Shared checks for OIDC consent changes: same-origin, rate limit, a
@@ -357,7 +404,7 @@ async function guardOidcConsentRequest(
     if (
         await isRateLimited(
             c.env.TOKEN_RATE_LIMITER,
-            c.req.header("CF-Connecting-IP") || "unknown"
+            `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
         )
     ) {
         return c.json({ error: "Rate limited. Try again later." }, 429);
@@ -366,23 +413,7 @@ async function guardOidcConsentRequest(
     const audience = parseAudience(rawAudience);
     if (!audience) return c.json({ error: "Unsupported audience" }, 400);
 
-    let user: GitHubUser;
-    try {
-        user = await c.get("client")!.getUser();
-    } catch {
-        return c.json(
-            { error: "Failed to verify identity. Please try again." },
-            401
-        );
-    }
-    const agent = await findAgentByUid(c.env.KV, agent_uid);
-    // Same response for "no such agent" and "not yours" so uids of other
-    // users' agents cannot be probed.
-    if (!agent || !isAgentOwner(agent.info, user)) {
-        return c.json(
-            { error: "Only the agent's owner can change its OIDC access" },
-            403
-        );
-    }
-    return { agent, audience, user };
+    const owned = await resolveOwnedOidcAgent(c, agent_uid);
+    if (owned instanceof Response) return owned;
+    return { ...owned, audience };
 }

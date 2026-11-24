@@ -34,7 +34,7 @@ export type OidcConsentRequest = {
  *
  * The link's `agent_id` is deliberately ignored: anyone can craft a link,
  * and several users may own agents with the same `agent_id`. The agent is
- * identified only by its uid and named from the server (`findAgentBySubject`).
+ * identified only by its uid and named by the server (GET /api/consent/oidc/agent).
  */
 export function parseOidcConsentParams(
     search: string
@@ -45,12 +45,4 @@ export function parseOidcConsentParams(
     const gcp = audience ? describeGcpAudience(audience) : null;
     if (!agentUid || !audience || !gcp) return null;
     return { agentUid, audience, gcp };
-}
-
-/** Find the signed-in user's agent whose OIDC subject is `agent:<uid>`. */
-export function findAgentBySubject<
-    T extends { oidc_subject?: string | undefined },
->(agents: readonly T[], agentUid: string): T | null {
-    const subject = `agent:${agentUid}`;
-    return agents.find((agent) => agent.oidc_subject === subject) ?? null;
 }

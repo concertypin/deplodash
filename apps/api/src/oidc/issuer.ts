@@ -61,6 +61,22 @@ export type IssuerConfig = {
     signingKey: string;
 };
 
+// One warning per message per isolate: `OIDC_ISSUER` ships in wrangler.jsonc
+// before the signing key secret is set, and every /.well-known or /api/oidc
+// request checks the config.
+const warned = new Set<string>();
+
+function warnOnce(message: string): void {
+    if (warned.has(message)) return;
+    warned.add(message);
+    console.warn(message);
+}
+
+/** Only needed for testing. */
+export function resetIssuerWarnings(): void {
+    warned.clear();
+}
+
 /**
  * The OIDC feature is enabled only when both a valid `OIDC_ISSUER` and an
  * `OIDC_SIGNING_KEY` are configured. A half or invalid configuration is
@@ -72,7 +88,7 @@ export function getIssuerConfig(
     if (!env.OIDC_ISSUER && !env.OIDC_SIGNING_KEY) return null;
     const issuer = normalizeIssuer(env.OIDC_ISSUER);
     if (!issuer || !env.OIDC_SIGNING_KEY) {
-        console.warn(
+        warnOnce(
             !env.OIDC_ISSUER || !env.OIDC_SIGNING_KEY
                 ? "oidc: disabled — OIDC_ISSUER and OIDC_SIGNING_KEY must both be set"
                 : "oidc: disabled — OIDC_ISSUER is not a canonical https origin (no port, path or trailing slash)"

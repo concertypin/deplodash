@@ -226,4 +226,17 @@ describe("GET /.well-known/openid-configuration (misconfigured)", () => {
         const res = await request("/.well-known/openid-configuration", env);
         expect(res.status).toBe(503);
     });
+
+    it("returns 503 when the rotation key set is invalid", async () => {
+        // Otherwise discovery says 200 while every JWKS fetch fails.
+        const env = makeBaseEnv({
+            KV: THROWING_KV,
+            OIDC_ISSUER: ISSUER,
+            OIDC_SIGNING_KEY: signingKey,
+            OIDC_ADDITIONAL_JWKS: "{not json",
+        });
+        const res = await request("/.well-known/openid-configuration", env);
+        expect(res.status).toBe(503);
+        expect((await request("/.well-known/jwks.json", env)).status).toBe(503);
+    });
 });

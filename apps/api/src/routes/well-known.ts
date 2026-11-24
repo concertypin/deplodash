@@ -15,7 +15,6 @@ import {
     buildJwks,
     getIssuerConfig,
 } from "@/oidc/issuer";
-import { getOidcSigner } from "@/oidc/signer";
 
 const CACHE_CONTROL = "public, max-age=300";
 const MISCONFIGURED = { error: "OIDC signing keys are misconfigured" };
@@ -25,9 +24,10 @@ export const wellKnownRouter = new Hono<HonoEnv>()
         const config = getIssuerConfig(c.env);
         if (!config) return c.text("Not Found", 404);
         try {
-            // Fail here too, so a WIF provider is never created against an
-            // issuer whose JWKS cannot be served.
-            await getOidcSigner(config.signingKey);
+            // Build the JWKS here too (signing key and rotation keys), so a
+            // WIF provider is never created against an issuer whose JWKS
+            // cannot be served.
+            await buildJwks(config, c.env.OIDC_ADDITIONAL_JWKS);
         } catch (err: unknown) {
             console.error("well-known: invalid OIDC signing key", err);
             return c.json(MISCONFIGURED, 503);

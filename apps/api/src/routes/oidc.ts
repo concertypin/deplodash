@@ -17,7 +17,7 @@ import { describeRoute, resolver, validator } from "hono-openapi";
 import { bodyLimit } from "hono/body-limit";
 import * as z from "zod";
 import type { HonoEnv } from "@/types";
-import { agentAuthMiddleware, ensureAgentUid } from "@/middleware/agent-auth";
+import { agentAuthMiddleware } from "@/middleware/agent-auth";
 import { buildOidcConsentUrl } from "@/helpers";
 import { isRateLimited } from "@/rate-limit";
 import { getIssuerConfig } from "@/oidc/issuer";
@@ -52,6 +52,14 @@ const errorResponseSchema = z.object({ error: z.string() });
 const errorContent = {
     "application/json": { schema: resolver(errorResponseSchema) },
 };
+
+const LEGACY_AGENT =
+    "This agent token predates OIDC support. Issue a new agent token from the dashboard to use OIDC.";
+
+/** Rate-limit key; namespaced so no agent_id or IP key can collide with it. */
+function oidcRateLimitKey(agentUid: string): string {
+    return `oidc:${agentUid}`;
+}
 
 const UNSUPPORTED_AUDIENCE =
     "Unsupported audience. Expected a GCP Workload Identity provider: " +
@@ -90,6 +98,11 @@ export const oidcRouter = new Hono<HonoEnv>()
                     description: "Invalid or missing agent token",
                     content: errorContent,
                 },
+                409: {
+                    description:
+                        "Agent token predates OIDC support; issue a new one",
+                    content: errorContent,
+                },
                 429: { description: "Rate limited", content: errorContent },
                 503: {
                     description: "OIDC issuer not configured",
@@ -103,25 +116,25 @@ export const oidcRouter = new Hono<HonoEnv>()
             if (!config) {
                 return c.json({ error: "OIDC issuer is not configured" }, 503);
             }
-            const { token, info } = c.get("agent")!;
-            const audience = parseAudience(c.req.valid("json").audience);
+            const { info } = c.get("agent")!;
+            const requestedAudience = c.req.valid("json").audience;
+            const audience = parseAudience(requestedAudience);
             if (!audience) return c.json({ error: UNSUPPORTED_AUDIENCE }, 400);
+            // Never assigned at runtime: see isOidcOwner.
+            const agentUid = info.uid;
+            if (!agentUid) return c.json({ error: LEGACY_AGENT }, 409);
+            // Keyed by uid: agent_id is user-chosen and not unique across
+            // owners, so it would let one user throttle another's agent.
+            if (
+                await isRateLimited(
+                    c.env.TOKEN_RATE_LIMITER,
+                    oidcRateLimitKey(agentUid)
+                )
+            ) {
+                return c.json({ error: "Rate limited. Try again later." }, 429);
+            }
 
             try {
-                const agentUid = await ensureAgentUid(c.env.KV, token, info);
-                // Keyed by uid: agent_id is user-chosen and not unique across
-                // owners, so it would let one user throttle another's agent.
-                if (
-                    await isRateLimited(
-                        c.env.TOKEN_RATE_LIMITER,
-                        `oidc:${agentUid}`
-                    )
-                ) {
-                    return c.json(
-                        { error: "Rate limited. Try again later." },
-                        429
-                    );
-                }
                 const subject = agentSubject(agentUid);
                 const consents = new OidcConsentService(c.env.KV);
                 if (!(await consents.hasConsent(agentUid, audience.audience))) {
@@ -147,7 +160,11 @@ export const oidcRouter = new Hono<HonoEnv>()
                     agentUid,
                     agentId: info.agent_id,
                     ownerGithubId: info.created_by_id,
-                    audience: audience.audience,
+                    // Sign the spelling the agent asked for: with an empty
+                    // allowed-audiences list Google accepts both, but an
+                    // explicit list is matched literally. Consent is still
+                    // keyed by the canonical form.
+                    audience: requestedAudience,
                 });
                 return c.json({
                     status: "ok",
@@ -188,19 +205,26 @@ export const oidcRouter = new Hono<HonoEnv>()
                         "Timeout (Consent not granted within the wait period)",
                     content: errorContent,
                 },
+                409: {
+                    description:
+                        "Agent token predates OIDC support; issue a new one",
+                    content: errorContent,
+                },
+                429: { description: "Rate limited", content: errorContent },
+                499: { description: "Client disconnected" },
             },
         }),
         validator("json", requestSchema),
         async (c) => {
-            const { token, info } = c.get("agent")!;
+            const { info } = c.get("agent")!;
             const audience = parseAudience(c.req.valid("json").audience);
             if (!audience) return c.json({ error: UNSUPPORTED_AUDIENCE }, 400);
-
-            const agentUid = await ensureAgentUid(c.env.KV, token, info);
+            const agentUid = info.uid;
+            if (!agentUid) return c.json({ error: LEGACY_AGENT }, 409);
             if (
                 await isRateLimited(
                     c.env.TOKEN_RATE_LIMITER,
-                    `oidc:${agentUid}`
+                    oidcRateLimitKey(agentUid)
                 )
             ) {
                 return c.json({ error: "Rate limited. Try again later." }, 429);

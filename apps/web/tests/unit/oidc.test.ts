@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-    describeGcpAudience,
-    findAgentBySubject,
-    parseOidcConsentParams,
-} from "@/lib/oidc";
+import { describeGcpAudience, parseOidcConsentParams } from "@/lib/oidc";
 
 const AUDIENCE =
     "https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/agents-pool/providers/deplodash";
@@ -62,26 +58,5 @@ describe("parseOidcConsentParams", () => {
         expect(
             parseOidcConsentParams(`?${new URLSearchParams(params).toString()}`)
         ).toBeNull();
-    });
-});
-
-describe("findAgentBySubject", () => {
-    // Two users can both have an agent called "asdf"; only the uid tells
-    // them apart.
-    const agents = [
-        { agent_id: "asdf", oidc_subject: "agent:uid-of-user-1-agent-x" },
-        { agent_id: "asdf", oidc_subject: "agent:uid-of-user-2-agent-y" },
-        { agent_id: "legacy" },
-    ];
-
-    it("matches the exact subject, not the agent_id", () => {
-        expect(findAgentBySubject(agents, "uid-of-user-2-agent-y")).toBe(
-            agents[1]
-        );
-    });
-
-    it("returns null when no agent has that uid", () => {
-        expect(findAgentBySubject(agents, "uid-of-user-2")).toBeNull();
-        expect(findAgentBySubject(agents, "")).toBeNull();
     });
 });

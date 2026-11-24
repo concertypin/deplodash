@@ -1,7 +1,6 @@
 <script lang="ts">
     import { client } from "@/lib/api";
     import {
-        findAgentBySubject,
         parseOidcConsentParams,
         type OidcConsentRequest,
     } from "@/lib/oidc";
@@ -36,11 +35,23 @@
               agent: OwnedAgent;
           };
 
+    /** Server-side, owner-checked lookup by uid (403 for unknown or foreign uids). */
     async function findOwnedAgent(uid: string): Promise<OwnedAgent | null> {
-        const res = await client.api.user.agent.list.$get();
+        const res = await client.api.consent.oidc.agent.$get({
+            query: { agent_uid: uid },
+        });
         if (!res.ok) return null;
-        const match = findAgentBySubject((await res.json()).tokens, uid);
-        return match ? { agent_id: match.agent_id, label: match.label } : null;
+        const data: unknown = await res.json();
+        return isOwnedAgent(data) ? data : null;
+    }
+
+    function isOwnedAgent(value: unknown): value is OwnedAgent {
+        if (typeof value !== "object" || value === null) return false;
+        const candidate = Object.fromEntries(Object.entries(value));
+        return (
+            typeof candidate.agent_id === "string" &&
+            typeof candidate.label === "string"
+        );
     }
 
     let page = $state<PageState>({ kind: "loading" });

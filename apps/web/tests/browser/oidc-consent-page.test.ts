@@ -33,7 +33,10 @@ function openConsentUrl(params: Record<string, string>) {
 
 type Agent = { agent_id: string; label: string; oidc_subject: string };
 
-/** Stub the API: the signed-in user owns `agents`; `onConsent` answers POST /api/consent/oidc. */
+/**
+ * Stub the API: the signed-in user owns `agents` (looked up by uid through
+ * GET /api/consent/oidc/agent); `onConsent` answers POST /api/consent/oidc.
+ */
 function stubApi(
     agents: Agent[],
     onConsent?: (body: unknown) => Promise<Response>
@@ -45,15 +48,25 @@ function stubApi(
             if (url === "/api/user/me") {
                 return jsonResponse({ login: "owner", avatarUrl: "" });
             }
-            if (url === "/api/user/agent/list") {
-                return jsonResponse({
-                    status: "ok",
-                    tokens: agents.map((agent) => ({
-                        token: `tok-${agent.agent_id}`,
-                        created_at: "2026-11-24T00:00:00Z",
-                        ...agent,
-                    })),
-                });
+            if (url.startsWith("/api/consent/oidc/agent?")) {
+                // Mirrors the server: only the user's own agents resolve.
+                const uid = new URL(url, "http://localhost").searchParams.get(
+                    "agent_uid"
+                );
+                const match = agents.find(
+                    (agent) => agent.oidc_subject === `agent:${uid}`
+                );
+                return match
+                    ? jsonResponse({
+                          agent_id: match.agent_id,
+                          label: match.label,
+                      })
+                    : jsonResponse(
+                          {
+                              error: "Only the agent's owner can change its OIDC access",
+                          },
+                          403
+                      );
             }
             if (url === "/api/consent/oidc" && onConsent) {
                 return onConsent(
@@ -197,5 +210,27 @@ describe("OidcConsentPage", () => {
                 "Only the agent's owner can change its OIDC access"
             );
         expect(consentBodies).toEqual([{ agent_uid: UID, audience: AUDIENCE }]);
+    });
+
+    it("refuses an unexpected lookup response instead of trusting it", async () => {
+        openConsentUrl({ agent_uid: UID, audience: AUDIENCE });
+        vi.stubGlobal(
+            "fetch",
+            vi.fn<typeof fetch>((input) => {
+                const url = requestUrl(input);
+                if (url === "/api/user/me") {
+                    return jsonResponse({ login: "owner", avatarUrl: "" });
+                }
+                // 200 but not an agent: e.g. a proxy or an API change.
+                return jsonResponse({ unexpected: true });
+            })
+        );
+
+        const screen = await render(OidcConsentPage);
+
+        await expect
+            .element(screen.getByText(/does not belong to your account/))
+            .toBeVisible();
+        expect(screen.container.querySelector("button")).toBeNull();
     });
 });

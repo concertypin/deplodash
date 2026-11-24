@@ -58,9 +58,13 @@ The OIDC feature (`/.well-known/openid-configuration`, `/.well-known/jwks.json`)
 | `OIDC_SIGNING_KEY`     | Secret. RSA private key (PKCS#8 PEM, 2048+ bits) for RS256. Generate with `node scripts/generate-oidc-signing-key.ts`.                                                   |
 | `OIDC_ADDITIONAL_JWKS` | Optional RSA public keys (`{"keys":[…]}`) published next to the active key during rotation.                                                                              |
 
+After the first deploy, check that `/.well-known/openid-configuration` returns JSON: before the routes existed the SPA's `index.html` was served (and edge-cached) there, so purge the Cloudflare cache for `/.well-known/*` if needed.
+
+Agent tokens created before OIDC support have no `uid` and get `409` from `/api/oidc/*`. They are never upgraded at runtime: KV reads are cached per location for up to ~60 s, so rewriting `agent_tokens:*` from a request could resurrect a revoked token (see `isOidcOwner`).
+
 Signing key rotation:
 
-1. Generate the new key and publish its public half in `OIDC_ADDITIONAL_JWKS` (keep signing with the old key).
+1. Generate the new key and publish its public half in `OIDC_ADDITIONAL_JWKS` (keep signing with the old key). `node scripts/generate-oidc-signing-key.ts --public < new-key.pem` prints the public JWK; wrap it as `{"keys":[…]}`.
 2. Wait at least 15 minutes so relying parties refresh their JWKS cache (OpenAI caches for 600 s; the endpoint sends `max-age=300`).
 3. Swap: put the new key in `OIDC_SIGNING_KEY`, and the old key's public half in `OIDC_ADDITIONAL_JWKS`.
 4. After the longest token lifetime plus the cache window, remove the old public key.
