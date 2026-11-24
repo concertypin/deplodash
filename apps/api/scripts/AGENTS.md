@@ -32,3 +32,7 @@ Requires Node 24+ (native TypeScript stripping, no `--experimental-strip-types` 
 - The installer always prints the `useHttpPath` notice and asks for consent before any change; without a terminal it requires `--yes`. Tests that run the installer pass `--yes` and spawn it detached (no controlling terminal) so a prompt can never block.
 - Tests run under `node:test` via `pnpm run test:credential`, not the Workers Vitest pool.
 - Fallbacks include every host-wide spelling of github.com (`https://GitHub.com`, trailing slash, `:443`). Helpers scoped to a path or user name under github.com, and `includeIf` files, are reset by the section and only reported as warnings, never widened to all repositories. The installer needs Git 2.26+ (`git config --show-scope`).
+
+## OIDC Signing Key
+
+`generate-oidc-signing-key.ts` prints a new RS256 signing key (PKCS#8 PEM) for the `OIDC_SIGNING_KEY` secret; `--public` reads a PEM from stdin and prints its public JWK for `OIDC_ADDITIONAL_JWKS` during rotation (runbook in `apps/api/AGENTS.md`). `generate-oidc-signing-key.test.ts` runs under `pnpm run test:credential`.
