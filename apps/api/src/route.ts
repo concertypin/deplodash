@@ -7,6 +7,7 @@ import { consentRouter } from "@/routes/consent";
 import { tokenRouter } from "@/routes/token";
 import { userRouter } from "@/routes/user";
 import { llmsRouter } from "@/routes/llms";
+import { wellKnownRouter } from "@/routes/well-known";
 
 /**
  * Root router that composes all sub-routers.
@@ -16,11 +17,19 @@ import { llmsRouter } from "@/routes/llms";
  *   /api       → API token (/api/token)
  *   /api/consent    → Consent API (/api/consent, /api/consent/revoke)
  *   /llms.txt  → LLM agent documentation
+ *   /.well-known → OIDC discovery + JWKS (Workload Identity Federation)
  *
  * — OAuth routes, consent routes, and user routes. token API and
  * /llms.txt use Bearer token or no auth and don't need cookie-based sessions.
+ *
+ * Note: the session sub-app's `use("*")` is registered on this router as
+ * `/*`, so it also runs for every route mounted after it. /.well-known is
+ * mounted first so relying parties fetching discovery/JWKS never go through
+ * session decryption or emit `Set-Cookie` on a publicly cached response.
  */
 export const router = new Hono<HonoEnv>()
+    // Public OIDC metadata — must stay ahead of the session middleware.
+    .route("/", wellKnownRouter)
     // Routes requiring session cookie (OAuth, consent, user)
     .route(
         "/",

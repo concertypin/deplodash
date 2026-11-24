@@ -24,7 +24,8 @@
     "vars": {
         "GITHUB_CLIENT_ID": "Iv23li3WmDEd5eJbm4fO",
         "CALLBACK_URL": "https://deplodash.euroka.moe/callback",
-        "GITHUB_APP_ID": "4054947"
+        "GITHUB_APP_ID": "4054947",
+        "OIDC_ISSUER": "https://deplodash.euroka.moe"
     },
     "secrets": {
         "required": [
