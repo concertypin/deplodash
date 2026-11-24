@@ -16,5 +16,15 @@ ENCRYPTION_SECRET=
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=
 
+# OIDC issuer for Workload Identity Federation (optional — the feature is off without these)
+# OIDC_ISSUER: public https origin of this deployment (no port, path or trailing slash).
+#   Local dev may use http://localhost:5173.
+# OIDC_SIGNING_KEY: RSA private key (PKCS#8 PEM, 2048+ bits), generate with
+#   node scripts/generate-oidc-signing-key.ts
+# OIDC_ADDITIONAL_JWKS: optional RSA public keys ({"keys":[...]}) kept for key rotation
+# OIDC_ISSUER=
+# OIDC_SIGNING_KEY=
+# OIDC_ADDITIONAL_JWKS=
+
 # Direct GitHub PAT (optional — skips OAuth, read-only mode for dev/testing)
 # GITHUB_TOKEN=

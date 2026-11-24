@@ -52,6 +52,25 @@ export type Env = {
      * when the binding is not available (e.g., local dev, test environments).
      */
     TOKEN_RATE_LIMITER?: RateLimit;
+    /**
+     * Public origin of this deployment, used as the OIDC `iss` for Workload
+     * Identity Federation (e.g. `https://deplodash.euroka.moe`). https, no
+     * port, path or trailing slash. Changing it breaks every user's WIF
+     * provider. Optional — the OIDC feature is disabled when unset.
+     */
+    OIDC_ISSUER?: string;
+    /**
+     * RSA private key (PKCS#8 or PKCS#1 PEM, 2048+ bits) used to sign OIDC
+     * identity tokens with RS256. Secret.
+     * Generate with `node scripts/generate-oidc-signing-key.ts`.
+     * Optional — the OIDC feature is disabled when unset.
+     */
+    OIDC_SIGNING_KEY?: string;
+    /**
+     * Extra RSA public keys (`{"keys":[…]}`) published in the JWKS next to
+     * the signing key, used for key rotation. Public keys only.
+     */
+    OIDC_ADDITIONAL_JWKS?: string;
 };
 
 // ─── Hono Environment Type ───────────────────────────────────────────────────

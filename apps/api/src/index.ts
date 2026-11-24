@@ -13,6 +13,10 @@ export type { AppType };
  */
 
 const apiPathPattern = /^\/api(?:\/|$)/i;
+// Unknown well-known URIs (e.g. a relying party probing
+// /.well-known/oauth-authorization-server) must not get the SPA's index.html
+// with a 200.
+const wellKnownPathPattern = /^\/\.well-known(?:\/|$)/i;
 
 const app = new Hono<HonoEnv>().use("*", logger()).route("/", router);
 
@@ -49,7 +53,7 @@ app.notFound((c) => {
     }
 
     const pathname = c.req.path;
-    if (apiPathPattern.test(pathname)) {
+    if (apiPathPattern.test(pathname) || wellKnownPathPattern.test(pathname)) {
         return c.text("Not Found", 404);
     }
 

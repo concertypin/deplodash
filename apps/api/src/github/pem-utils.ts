@@ -17,16 +17,22 @@ type DerResult = { der: Uint8Array<ArrayBuffer>; isPkcs1: boolean };
  * Parse a PEM-encoded RSA private key and import it as a CryptoKey for RS256 signing.
  */
 export async function pemToCryptoKey(pem: string): Promise<CryptoKey> {
-    const { der, isPkcs1 } = extractDer(pem.trim());
-
-    const pkcs8Der = isPkcs1 ? pkcs1ToPkcs8(der) : der;
     return crypto.subtle.importKey(
         "pkcs8",
-        pkcs8Der,
+        pemToPkcs8Der(pem),
         { name: "RSASSA-PKCS1-v1_5", hash: { name: "SHA-256" } },
         false,
         ["sign"]
     );
+}
+
+/**
+ * Decode any supported key input into PKCS#8 DER bytes, converting PKCS#1
+ * when needed. Callers choose the import algorithm and extractability.
+ */
+export function pemToPkcs8Der(pem: string): Uint8Array<ArrayBuffer> {
+    const { der, isPkcs1 } = extractDer(pem.trim());
+    return isPkcs1 ? pkcs1ToPkcs8(der) : der;
 }
 
 /**

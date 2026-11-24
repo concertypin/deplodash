@@ -87,6 +87,7 @@ export default defineConfig({
             "/callback": proxyTarget,
             "/logout": proxyTarget,
             "/llms.txt": proxyTarget,
+            "/.well-known": proxyTarget,
             "/openapi.json": proxyTarget,
             "/docs": proxyTarget,
         },

@@ -47,6 +47,23 @@ Set in `.dev.vars` for local dev, or via `wrangler secret put` / Cloudflare dash
 | -------------- | ------------------------------- |
 | `GITHUB_TOKEN` | Direct GitHub PAT (skips OAuth) |
 
+### Optional (OIDC issuer for Workload Identity Federation)
+
+The OIDC feature (`/.well-known/openid-configuration`, `/.well-known/jwks.json`) is off unless both `OIDC_ISSUER` and `OIDC_SIGNING_KEY` are set.
+
+| Variable               | Description                                                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OIDC_ISSUER`          | Public origin used as `iss` (`https://deplodash.euroka.moe`; https, no port/path/trailing slash). **Never change it once users rely on it**: every WIF provider pins it. |
+| `OIDC_SIGNING_KEY`     | Secret. RSA private key (PKCS#8 PEM, 2048+ bits) for RS256. Generate with `node scripts/generate-oidc-signing-key.ts`.                                                   |
+| `OIDC_ADDITIONAL_JWKS` | Optional RSA public keys (`{"keys":[…]}`) published next to the active key during rotation.                                                                              |
+
+Signing key rotation:
+
+1. Generate the new key and publish its public half in `OIDC_ADDITIONAL_JWKS` (keep signing with the old key).
+2. Wait at least 15 minutes so relying parties refresh their JWKS cache (OpenAI caches for 600 s; the endpoint sends `max-age=300`).
+3. Swap: put the new key in `OIDC_SIGNING_KEY`, and the old key's public half in `OIDC_ADDITIONAL_JWKS`.
+4. After the longest token lifetime plus the cache window, remove the old public key.
+
 ### Cloudflare Bindings
 
 | Binding              | Description                                      |
