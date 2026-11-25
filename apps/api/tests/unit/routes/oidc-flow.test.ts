@@ -123,41 +123,93 @@ async function createAgent(
     return token;
 }
 
+interface JsonRequestOptions {
+    headers?: Record<string, string>;
+    environment?: ReturnType<typeof testEnv>;
+    signal?: AbortSignal | null;
+}
+
+/** Sends `body` as JSON; `headers` are added after the Content-Type. */
+function jsonRequest(
+    method: "POST" | "QUERY",
+    path: string,
+    body: unknown,
+    {
+        headers = {},
+        environment = testEnv(),
+        signal = null,
+    }: JsonRequestOptions = {}
+) {
+    return router.request(
+        path,
+        {
+            method,
+            headers: { "Content-Type": "application/json", ...headers },
+            body: JSON.stringify(body),
+            signal,
+        },
+        environment
+    );
+}
+
+/** A plain GET: no headers, no body. */
+function getJson(path: string, environment = testEnv()) {
+    return router.request(path, {}, environment);
+}
+
+function postJson(path: string, body: unknown, options?: JsonRequestOptions) {
+    return jsonRequest("POST", path, body, options);
+}
+
+/** The agent's `Authorization` header; none for `null`. */
+function bearer(agentToken: string | null): Record<string, string> {
+    return agentToken ? { Authorization: `Bearer ${agentToken}` } : {};
+}
+
+/** A rate limiter that answers `success` and records every key it sees. */
+function recordingLimiter(success: boolean) {
+    const keys: string[] = [];
+    const limiter = {
+        limit: ({ key }: { key: string }) => {
+            keys.push(key);
+            return Promise.resolve({ success });
+        },
+    };
+    return { keys, limiter };
+}
+
 function requestToken(
     agentToken: string | null,
     audience: string = AUDIENCE,
     environment = testEnv()
 ) {
-    return router.request(
+    return postJson(
         "/api/oidc/token",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...(agentToken
-                    ? { Authorization: `Bearer ${agentToken}` }
-                    : {}),
-            },
-            body: JSON.stringify({ audience }),
-        },
-        environment
+        { audience },
+        { headers: bearer(agentToken), environment }
+    );
+}
+
+function requestWait(
+    agentToken: string | null,
+    audience: string = AUDIENCE,
+    environment = testEnv(),
+    signal: AbortSignal | null = null
+) {
+    return jsonRequest(
+        "QUERY",
+        "/api/oidc/wait",
+        { audience },
+        { headers: bearer(agentToken), environment, signal }
     );
 }
 
 function postConsent(
     path: "/api/consent/oidc" | "/api/consent/oidc/revoke",
     body: { agent_uid: string; audience: string },
-    headers: Record<string, string> = {}
+    options?: JsonRequestOptions
 ) {
-    return router.request(
-        `http://localhost${path}`,
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...headers },
-            body: JSON.stringify(body),
-        },
-        testEnv()
-    );
+    return postJson(`http://localhost${path}`, body, options);
 }
 
 async function uidOf(agentToken: string): Promise<string> {
@@ -198,11 +250,7 @@ describe("POST /api/oidc/token", () => {
         const res = await requestToken(
             agent,
             AUDIENCE,
-            testEnv({
-                TOKEN_RATE_LIMITER: {
-                    limit: () => Promise.resolve({ success: false }),
-                },
-            })
+            testEnv({ TOKEN_RATE_LIMITER: recordingLimiter(false).limiter })
         );
         expect(res.status).toBe(429);
     });
@@ -259,11 +307,7 @@ describe("POST /api/oidc/token", () => {
         });
 
         // Verify like a relying party: discovery → JWKS → kid → signature.
-        const jwksRes = await router.request(
-            "/.well-known/jwks.json",
-            {},
-            testEnv()
-        );
+        const jwksRes = await getJson("/.well-known/jwks.json");
         const { keys } = jwksSchema.parse(await jwksRes.json());
         const kid = z.object({ kid: z.string() }).parse(decodeJson(header)).kid;
         const jwk = keys.find((key) => key.kid === kid);
@@ -317,19 +361,7 @@ describe("POST /api/oidc/token", () => {
         expect(errorSchema.parse(await res.json()).error).toMatch(
             /predates OIDC support/
         );
-        const waitRes = await router.request(
-            "/api/oidc/wait",
-            {
-                method: "QUERY",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ audience: AUDIENCE }),
-            },
-            testEnv()
-        );
-        expect(waitRes.status).toBe(409);
+        expect((await requestWait(token)).status).toBe(409);
 
         expect(await env.KV.get(`agent_tokens:${token}`)).toBe(before);
         expect((await env.KV.list({ prefix: "agent_uid:" })).keys).toEqual([]);
@@ -354,18 +386,9 @@ describe("POST /api/oidc/token", () => {
         ],
     ])("returns 400 for %s", async (_label, body) => {
         const agent = await createAgent();
-        const res = await router.request(
-            "/api/oidc/token",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${agent}`,
-                },
-                body: JSON.stringify(body),
-            },
-            testEnv()
-        );
+        const res = await postJson("/api/oidc/token", body, {
+            headers: bearer(agent),
+        });
         expect(res.status).toBe(400);
     });
 
@@ -454,7 +477,7 @@ describe("POST /api/consent/oidc", () => {
         const res = await postConsent(
             "/api/consent/oidc",
             { agent_uid: await uidOf(agent), audience: AUDIENCE },
-            { Origin: "https://evil.example" }
+            { headers: { Origin: "https://evil.example" } }
         );
         expect(res.status).toBe(403);
         expect(errorSchema.parse(await res.json()).error).toBe("CSRF detected");
@@ -525,32 +548,13 @@ describe("POST /api/consent/oidc", () => {
 });
 
 describe("QUERY /api/oidc/wait", () => {
-    function wait(
-        agentToken: string,
-        audience: string = AUDIENCE,
-        environment = testEnv()
-    ) {
-        return router.request(
-            "/api/oidc/wait",
-            {
-                method: "QUERY",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${agentToken}`,
-                },
-                body: JSON.stringify({ audience }),
-            },
-            environment
-        );
-    }
-
     it("returns 204 immediately when consent already exists", async () => {
         const agent = await createAgent();
         await postConsent("/api/consent/oidc", {
             agent_uid: await uidOf(agent),
             audience: AUDIENCE,
         });
-        expect((await wait(agent)).status).toBe(204);
+        expect((await requestWait(agent)).status).toBe(204);
     });
 
     it("wakes up with 204 on the owner's approval, not on the next poll", async () => {
@@ -560,7 +564,7 @@ describe("QUERY /api/oidc/wait", () => {
         // The agent waits with the // spelling; the owner approves the
         // https: form. Both must share the canonical waiter key.
         const pending = Promise.resolve(
-            wait(agent, AUDIENCE.replace(/^https:/, ""))
+            requestWait(agent, AUDIENCE.replace(/^https:/, ""))
         );
         let settled = false;
         void pending.then(() => {
@@ -580,38 +584,22 @@ describe("QUERY /api/oidc/wait", () => {
 
     it("returns 400 for an unsupported audience", async () => {
         const agent = await createAgent();
-        expect((await wait(agent, "https://evil.example/aud")).status).toBe(
-            400
-        );
+        expect(
+            (await requestWait(agent, "https://evil.example/aud")).status
+        ).toBe(400);
     });
 
     it("returns 401 without an agent token", async () => {
-        const res = await router.request(
-            "/api/oidc/wait",
-            {
-                method: "QUERY",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ audience: AUDIENCE }),
-            },
-            testEnv()
-        );
-        expect(res.status).toBe(401);
+        expect((await requestWait(null)).status).toBe(401);
     });
 
     it("rate-limits per agent uid", async () => {
         const agent = await createAgent();
-        const keys: string[] = [];
-        const res = await wait(
+        const { keys, limiter } = recordingLimiter(false);
+        const res = await requestWait(
             agent,
             AUDIENCE,
-            testEnv({
-                TOKEN_RATE_LIMITER: {
-                    limit: ({ key }: { key: string }) => {
-                        keys.push(key);
-                        return Promise.resolve({ success: false });
-                    },
-                },
-            })
+            testEnv({ TOKEN_RATE_LIMITER: limiter })
         );
         expect(res.status).toBe(429);
         expect(keys).toEqual([`oidc:${await uidOf(agent)}`]);
@@ -621,29 +609,15 @@ describe("QUERY /api/oidc/wait", () => {
         const agent = await createAgent();
         await uidOf(agent);
         vi.useFakeTimers();
-        const pending = wait(agent);
+        const pending = requestWait(agent);
         await vi.advanceTimersByTimeAsync(91_000);
         expect((await pending).status).toBe(403);
     });
 });
 
 describe("user routes", () => {
-    function userRequest(path: string, body?: unknown) {
-        return router.request(
-            `http://localhost${path}`,
-            body === undefined
-                ? {}
-                : {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(body),
-                  },
-            testEnv()
-        );
-    }
-
     it("creates agents with a uid and the owner's GitHub id", async () => {
-        const res = await userRequest("/api/user/agent/create", {
+        const res = await postJson("http://localhost/api/user/agent/create", {
             agent_id: "fresh",
         });
         expect(res.status).toBe(200);
@@ -669,7 +643,7 @@ describe("user routes", () => {
             })
         );
         const before = await env.KV.get("agent_tokens:legacy-list");
-        const res = await userRequest("/api/user/agent/list");
+        const res = await getJson("http://localhost/api/user/agent/list");
         const { tokens } = z
             .object({
                 tokens: z.array(z.looseObject({ agent_id: z.string() })),
@@ -699,7 +673,7 @@ describe("user routes", () => {
             grantedBy: "someone-else",
         });
 
-        const res = await userRequest("/api/user/oidc-consents");
+        const res = await getJson("http://localhost/api/user/oidc-consents");
         const { consents } = z
             .object({
                 consents: z.array(
@@ -728,8 +702,11 @@ describe("user routes", () => {
             audience: AUDIENCE,
         });
         expect(
-            (await userRequest("/api/user/agent/revoke", { token: agent }))
-                .status
+            (
+                await postJson("http://localhost/api/user/agent/revoke", {
+                    token: agent,
+                })
+            ).status
         ).toBe(200);
         const leftover = await env.KV.list({ prefix: `oidc_consent:${uid}:` });
         expect(leftover.keys).toEqual([]);
@@ -779,15 +756,8 @@ describe("agents with the same agent_id owned by different users", () => {
     it("rate-limits each agent separately, not by agent_id", async () => {
         const agent1 = await createAgent("asdf", USER_1);
         const agent2 = await createAgent("asdf", USER_2);
-        const keys: string[] = [];
-        const environment = testEnv({
-            TOKEN_RATE_LIMITER: {
-                limit: ({ key }: { key: string }) => {
-                    keys.push(key);
-                    return Promise.resolve({ success: true });
-                },
-            },
-        });
+        const { keys, limiter } = recordingLimiter(true);
+        const environment = testEnv({ TOKEN_RATE_LIMITER: limiter });
         await requestToken(agent1, AUDIENCE, environment);
         await requestToken(agent2, AUDIENCE, environment);
         expect(keys).toEqual([
@@ -800,11 +770,7 @@ describe("agents with the same agent_id owned by different users", () => {
         await createAgent("asdf", USER_1);
         const agent2 = await createAgent("asdf", USER_2);
         currentUser = USER_2;
-        const res = await router.request(
-            "http://localhost/api/user/agent/list",
-            {},
-            testEnv()
-        );
+        const res = await getJson("http://localhost/api/user/agent/list");
         const { tokens } = z
             .object({ tokens: z.array(z.object({ oidc_subject: z.string() })) })
             .parse(await res.json());
@@ -875,27 +841,28 @@ describe("agent ownership", () => {
         });
         // Someone holding the original login under a different GitHub id.
         currentUser = { login: OWNER.login, id: 999 };
-        const get = (path: string) =>
-            router.request(`http://localhost${path}`, {}, testEnv());
 
         const list = z
             .object({ tokens: z.array(z.unknown()) })
-            .parse(await (await get("/api/user/agent/list")).json());
+            .parse(
+                await (
+                    await getJson("http://localhost/api/user/agent/list")
+                ).json()
+            );
         expect(list.tokens).toEqual([]);
 
         const consents = z
             .object({ consents: z.array(z.unknown()) })
-            .parse(await (await get("/api/user/oidc-consents")).json());
+            .parse(
+                await (
+                    await getJson("http://localhost/api/user/oidc-consents")
+                ).json()
+            );
         expect(consents.consents).toEqual([]);
 
-        const revoke = await router.request(
+        const revoke = await postJson(
             "http://localhost/api/user/agent/revoke",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ token: agent }),
-            },
-            testEnv()
+            { token: agent }
         );
         expect(revoke.status).toBe(403);
         expect(await verifyAgentToken(env.KV, agent)).not.toBeNull();
@@ -903,17 +870,10 @@ describe("agent ownership", () => {
 
     it("returns 401 without a session", async () => {
         const agent = await createAgent();
-        const res = await router.request(
-            "http://localhost/api/consent/oidc",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    agent_uid: await uidOf(agent),
-                    audience: AUDIENCE,
-                }),
-            },
-            testEnv({ GITHUB_TOKEN: "" })
+        const res = await postConsent(
+            "/api/consent/oidc",
+            { agent_uid: await uidOf(agent), audience: AUDIENCE },
+            { environment: testEnv({ GITHUB_TOKEN: "" }) }
         );
         expect(res.status).toBe(401);
         expect(await env.KV.list({ prefix: "oidc_consent:" })).toMatchObject({
@@ -964,32 +924,18 @@ describe("agent ownership", () => {
         expect(res.status).toBe(200);
     });
 
-    it.each(["/api/consent/oidc", "/api/consent/oidc/revoke"])(
+    it.each(["/api/consent/oidc", "/api/consent/oidc/revoke"] as const)(
         "rate-limits %s per client IP",
         async (path) => {
             const agent = await createAgent();
-            const keys: string[] = [];
-            const res = await router.request(
-                `http://localhost${path}`,
+            const { keys, limiter } = recordingLimiter(false);
+            const res = await postConsent(
+                path,
+                { agent_uid: await uidOf(agent), audience: AUDIENCE },
                 {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "CF-Connecting-IP": "203.0.113.7",
-                    },
-                    body: JSON.stringify({
-                        agent_uid: await uidOf(agent),
-                        audience: AUDIENCE,
-                    }),
-                },
-                testEnv({
-                    TOKEN_RATE_LIMITER: {
-                        limit: ({ key }: { key: string }) => {
-                            keys.push(key);
-                            return Promise.resolve({ success: false });
-                        },
-                    },
-                })
+                    headers: { "CF-Connecting-IP": "203.0.113.7" },
+                    environment: testEnv({ TOKEN_RATE_LIMITER: limiter }),
+                }
             );
             expect(res.status).toBe(429);
             // Namespaced so it cannot collide with oidc:<uid> or repo keys.
@@ -1036,15 +982,9 @@ describe("agent uid records", () => {
     it("removes the uid index when the owner revokes the agent", async () => {
         const agent = await createAgent();
         const uid = await uidOf(agent);
-        await router.request(
-            "http://localhost/api/user/agent/revoke",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ token: agent }),
-            },
-            testEnv()
-        );
+        await postJson("http://localhost/api/user/agent/revoke", {
+            token: agent,
+        });
         expect(await env.KV.get(`agent_uid:${uid}`)).toBeNull();
     });
 });
@@ -1054,18 +994,11 @@ describe("QUERY /api/oidc/wait (client disconnect)", () => {
         const agent = await createAgent();
         await uidOf(agent);
         const controller = new AbortController();
-        const pending = router.request(
-            "/api/oidc/wait",
-            {
-                method: "QUERY",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${agent}`,
-                },
-                body: JSON.stringify({ audience: AUDIENCE }),
-                signal: controller.signal,
-            },
-            testEnv()
+        const pending = requestWait(
+            agent,
+            AUDIENCE,
+            testEnv(),
+            controller.signal
         );
         await new Promise((resolve) => setTimeout(resolve, 50));
         controller.abort();
@@ -1075,10 +1008,8 @@ describe("QUERY /api/oidc/wait (client disconnect)", () => {
 
 describe("GET /api/consent/oidc/agent", () => {
     function lookup(agentUid: string) {
-        return router.request(
-            `http://localhost/api/consent/oidc/agent?agent_uid=${agentUid}`,
-            {},
-            testEnv()
+        return getJson(
+            `http://localhost/api/consent/oidc/agent?agent_uid=${agentUid}`
         );
     }
 
@@ -1115,26 +1046,12 @@ describe("rate-limit key namespaces", () => {
             login: "attacker",
             id: 666,
         });
-        const keys: string[] = [];
-        const environment = testEnv({
-            TOKEN_RATE_LIMITER: {
-                limit: ({ key }: { key: string }) => {
-                    keys.push(key);
-                    return Promise.resolve({ success: false });
-                },
-            },
-        });
-        await router.request(
+        const { keys, limiter } = recordingLimiter(false);
+        const environment = testEnv({ TOKEN_RATE_LIMITER: limiter });
+        await postJson(
             "/api/token",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${attacker}`,
-                },
-                body: JSON.stringify({ repo: "attacker/repo" }),
-            },
-            environment
+            { repo: "attacker/repo" },
+            { headers: bearer(attacker), environment }
         );
         await requestToken(victim, AUDIENCE, environment);
         expect(keys).toEqual([`repo:oidc:${victimUid}`, `oidc:${victimUid}`]);

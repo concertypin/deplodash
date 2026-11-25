@@ -12,16 +12,16 @@
  *      until approval
  */
 
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { describeRoute, resolver, validator } from "hono-openapi";
 import { bodyLimit } from "hono/body-limit";
 import * as z from "zod";
-import type { HonoEnv } from "@/types";
+import type { AgentInfo, HonoEnv } from "@/types";
 import { agentAuthMiddleware } from "@/middleware/agent-auth";
 import { buildOidcConsentUrl } from "@/helpers";
 import { isRateLimited } from "@/rate-limit";
 import { getIssuerConfig } from "@/oidc/issuer";
-import { parseAudience } from "@/oidc/audience";
+import { type ParsedAudience, parseAudience } from "@/oidc/audience";
 import { OidcConsentService, oidcWaiterKey } from "@/oidc/consent";
 import { ID_TOKEN_TYPE, agentSubject, mintIdToken } from "@/oidc/token";
 import { addWaiter } from "@/token/wait-notifier";
@@ -56,14 +56,44 @@ const errorContent = {
 const LEGACY_AGENT =
     "This agent token predates OIDC support. Issue a new agent token from the dashboard to use OIDC.";
 
-/** Rate-limit key; namespaced so no agent_id or IP key can collide with it. */
-function oidcRateLimitKey(agentUid: string): string {
-    return `oidc:${agentUid}`;
-}
-
 const UNSUPPORTED_AUDIENCE =
     "Unsupported audience. Expected a GCP Workload Identity provider: " +
     "https://iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>";
+
+type OidcRequest = {
+    info: AgentInfo;
+    agentUid: string;
+    /** Canonical form: keys the consent and the waiter. */
+    audience: ParsedAudience;
+    /** The spelling the agent sent: signed as `aud`. */
+    requestedAudience: string;
+};
+
+/**
+ * Checks shared by /token and /wait: a supported audience, an agent token
+ * with a uid (never assigned at runtime, see isOidcOwner), and the agent's
+ * rate limit. Returns the error response to send, or the parsed request.
+ */
+async function readOidcRequest(
+    c: Context<
+        HonoEnv,
+        string,
+        { out: { json: z.infer<typeof requestSchema> } }
+    >
+): Promise<Response | OidcRequest> {
+    const { info } = c.get("agent")!;
+    const requestedAudience = c.req.valid("json").audience;
+    const audience = parseAudience(requestedAudience);
+    if (!audience) return c.json({ error: UNSUPPORTED_AUDIENCE }, 400);
+    const agentUid = info.uid;
+    if (!agentUid) return c.json({ error: LEGACY_AGENT }, 409);
+    // Keyed by uid, and namespaced: agent_id is user-chosen and not unique
+    // across owners, so it would let one user throttle another's agent.
+    if (await isRateLimited(c.env.TOKEN_RATE_LIMITER, `oidc:${agentUid}`)) {
+        return c.json({ error: "Rate limited. Try again later." }, 429);
+    }
+    return { info, agentUid, audience, requestedAudience };
+}
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
@@ -116,23 +146,9 @@ export const oidcRouter = new Hono<HonoEnv>()
             if (!config) {
                 return c.json({ error: "OIDC issuer is not configured" }, 503);
             }
-            const { info } = c.get("agent")!;
-            const requestedAudience = c.req.valid("json").audience;
-            const audience = parseAudience(requestedAudience);
-            if (!audience) return c.json({ error: UNSUPPORTED_AUDIENCE }, 400);
-            // Never assigned at runtime: see isOidcOwner.
-            const agentUid = info.uid;
-            if (!agentUid) return c.json({ error: LEGACY_AGENT }, 409);
-            // Keyed by uid: agent_id is user-chosen and not unique across
-            // owners, so it would let one user throttle another's agent.
-            if (
-                await isRateLimited(
-                    c.env.TOKEN_RATE_LIMITER,
-                    oidcRateLimitKey(agentUid)
-                )
-            ) {
-                return c.json({ error: "Rate limited. Try again later." }, 429);
-            }
+            const request = await readOidcRequest(c);
+            if (request instanceof Response) return request;
+            const { info, agentUid, audience, requestedAudience } = request;
 
             try {
                 const subject = agentSubject(agentUid);
@@ -216,19 +232,9 @@ export const oidcRouter = new Hono<HonoEnv>()
         }),
         validator("json", requestSchema),
         async (c) => {
-            const { info } = c.get("agent")!;
-            const audience = parseAudience(c.req.valid("json").audience);
-            if (!audience) return c.json({ error: UNSUPPORTED_AUDIENCE }, 400);
-            const agentUid = info.uid;
-            if (!agentUid) return c.json({ error: LEGACY_AGENT }, 409);
-            if (
-                await isRateLimited(
-                    c.env.TOKEN_RATE_LIMITER,
-                    oidcRateLimitKey(agentUid)
-                )
-            ) {
-                return c.json({ error: "Rate limited. Try again later." }, 429);
-            }
+            const request = await readOidcRequest(c);
+            if (request instanceof Response) return request;
+            const { agentUid, audience } = request;
             const consents = new OidcConsentService(c.env.KV);
             const check = () =>
                 consents.hasConsent(agentUid, audience.audience);
