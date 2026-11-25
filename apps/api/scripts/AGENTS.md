@@ -35,4 +35,4 @@ Requires Node 24+ (native TypeScript stripping, no `--experimental-strip-types` 
 
 ## OIDC Signing Key
 
-`generate-oidc-signing-key.ts` prints a new RS256 signing key (PKCS#8 PEM) for the `OIDC_SIGNING_KEY` secret; `--public` reads a PEM from stdin and prints its public JWK for `OIDC_ADDITIONAL_JWKS` during rotation (runbook in `apps/api/AGENTS.md`). `generate-oidc-signing-key.test.ts` runs under `pnpm run test:credential`.
+`generate-oidc-signing-key.ts` prints a new RS256 signing key (PKCS#8 PEM) for the `OIDC_SIGNING_KEY` secret; `--public` reads a PEM from stdin and prints its public JWK for `OIDC_ADDITIONAL_JWKS` during rotation (runbook in `apps/api/AGENTS.md`).
