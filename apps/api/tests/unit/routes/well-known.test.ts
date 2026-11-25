@@ -22,10 +22,15 @@ const jwksSchema = z.object({
     ),
 });
 
-const discoverySchema = z.looseObject({
+// Strict: an unexpected member (e.g. key material) fails the parse.
+const discoverySchema = z.strictObject({
     issuer: z.string(),
     jwks_uri: z.string(),
+    response_types_supported: z.array(z.string()),
+    subject_types_supported: z.array(z.string()),
+    scopes_supported: z.array(z.string()),
     id_token_signing_alg_values_supported: z.array(z.string()),
+    claims_supported: z.array(z.string()),
 });
 
 let signingKey: string;
@@ -80,6 +85,12 @@ describe("GET /.well-known/openid-configuration", () => {
         expect(doc.issuer).toBe(ISSUER);
         expect(doc.jwks_uri).toBe(`${ISSUER}/.well-known/jwks.json`);
         expect(doc.id_token_signing_alg_values_supported).toEqual(["RS256"]);
+        expect(doc.response_types_supported).toEqual(["id_token"]);
+        expect(doc.subject_types_supported).toEqual(["public"]);
+        expect(doc.scopes_supported).toEqual(["openid"]);
+        expect(doc.claims_supported).toEqual(
+            expect.arrayContaining(["iss", "sub", "aud", "exp", "agent_id"])
+        );
     });
 });
 
@@ -214,5 +225,18 @@ describe("GET /.well-known/openid-configuration (misconfigured)", () => {
         });
         const res = await request("/.well-known/openid-configuration", env);
         expect(res.status).toBe(503);
+    });
+
+    it("returns 503 when the rotation key set is invalid", async () => {
+        // Otherwise discovery says 200 while every JWKS fetch fails.
+        const env = makeBaseEnv({
+            KV: THROWING_KV,
+            OIDC_ISSUER: ISSUER,
+            OIDC_SIGNING_KEY: signingKey,
+            OIDC_ADDITIONAL_JWKS: "{not json",
+        });
+        const res = await request("/.well-known/openid-configuration", env);
+        expect(res.status).toBe(503);
+        expect((await request("/.well-known/jwks.json", env)).status).toBe(503);
     });
 });

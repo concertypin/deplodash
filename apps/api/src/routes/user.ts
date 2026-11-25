@@ -1,9 +1,13 @@
 import {
+    deleteAgentUidIndex,
+    isAgentOwner,
     listAgentTokens,
     registerAgentToken,
     revokeAgentToken,
     verifyAgentToken,
 } from "@/middleware/agent-auth";
+import { OidcConsentService } from "@/oidc/consent";
+import { agentSubject } from "@/oidc/token";
 import { randomBytes } from "@/crypto";
 import { validator } from "hono-openapi";
 import { z } from "zod";
@@ -27,6 +31,7 @@ const revokeAgentSchema = z.object({
  * GET /api/user/token   — user's personal OAuth access token
  * GET /api/user/me      — current GitHub user profile
  * GET /api/user/consents — user's granted consent list
+ * GET /api/user/oidc-consents — OIDC audiences approved for the user's agents
  *
  * All endpoints require a valid session cookie (set by OAuth login via /auth/github).
  * Returns 401 if not authenticated.
@@ -75,25 +80,49 @@ export const userRouter = new Hono<HonoEnv>()
         return c.json({ consents });
     })
 
+    // GET /api/user/oidc-consents — OIDC audiences approved for the user's agents
+    .get("/oidc-consents", sessionMiddleware(), authGuard(), async (c) => {
+        const client = c.get("client")!;
+        const user = await client.getUser();
+        const consents = new OidcConsentService(c.env.KV);
+        const agents = (await listAgentTokens(c.env.KV)).filter(
+            (t) => isAgentOwner(t.info, user) && t.info.uid
+        );
+        const items = [];
+        for (const agent of agents) {
+            for (const record of await consents.listForAgent(agent.info.uid!)) {
+                items.push({
+                    agent_id: record.agent_id,
+                    agent_uid: record.agent_uid,
+                    audience: record.audience,
+                    provider: record.provider,
+                    granted_by: record.granted_by,
+                    granted_at: record.granted_at,
+                });
+            }
+        }
+        return c.json({ consents: items });
+    })
+
     // Agent token management routes
     .get("/agent/list", sessionMiddleware(), authGuard(), async (c) => {
         const client = c.get("client")!;
         const user = await client.getUser();
 
         const allTokens = await listAgentTokens(c.env.KV);
-        const userTokens = allTokens.filter(
-            (t) => t.info.created_by === user.login
-        );
+        const userTokens = allTokens.filter((t) => isAgentOwner(t.info, user));
 
-        return c.json({
-            status: "ok",
-            tokens: userTokens.map((t) => ({
-                token: t.token,
-                agent_id: t.info.agent_id,
-                label: t.info.label,
-                created_at: t.info.created_at,
-            })),
-        });
+        // Agents created before OIDC support have no uid and never get one
+        // at runtime (see isOidcOwner), so they have no OIDC subject.
+        const tokens = userTokens.map((t) => ({
+            token: t.token,
+            agent_id: t.info.agent_id,
+            label: t.info.label,
+            created_at: t.info.created_at,
+            ...(t.info.uid ? { oidc_subject: agentSubject(t.info.uid) } : {}),
+        }));
+
+        return c.json({ status: "ok", tokens });
     })
 
     .post(
@@ -115,22 +144,24 @@ export const userRouter = new Hono<HonoEnv>()
             }
 
             const token = randomBytes(24);
-            await registerAgentToken(
+            const info = await registerAgentToken(
                 c.env.KV,
                 token,
                 agent_id,
                 label,
-                user.login
+                user.login,
+                user.id
             );
 
             return c.json({
                 status: "ok",
                 token,
                 info: {
-                    agent_id,
-                    label: label ?? agent_id,
-                    created_at: new Date().toISOString(),
+                    agent_id: info.agent_id,
+                    label: info.label,
+                    created_at: info.created_at,
                     created_by: user.login,
+                    oidc_subject: agentSubject(info.uid!),
                 },
             });
         }
@@ -147,11 +178,17 @@ export const userRouter = new Hono<HonoEnv>()
             const { token } = c.req.valid("json");
 
             const info = await verifyAgentToken(c.env.KV, token);
-            if (!info || info.created_by !== user.login) {
+            if (!info || !isAgentOwner(info, user)) {
                 return c.json({ error: "Forbidden or token not found" }, 403);
             }
 
             await revokeAgentToken(c.env.KV, token);
+            // The uid died with the token, so these can no longer be used;
+            // delete them so they do not linger in KV.
+            if (info.uid) {
+                await new OidcConsentService(c.env.KV).revokeAll(info.uid);
+                await deleteAgentUidIndex(c.env.KV, info.uid);
+            }
             return c.json({ status: "ok" });
         }
     );

@@ -56,3 +56,19 @@ export function buildConsentUrl(
         `&repo_mode=${encodeURIComponent(params.repoMode)}`
     );
 }
+
+/**
+ * Build the OIDC consent page URL an agent forwards to its owner, asking
+ * them to let the agent mint identity tokens for `audience`.
+ */
+export function buildOidcConsentUrl(
+    baseUrl: string,
+    params: { agentId: string; agentUid: string; audience: string }
+): string {
+    const origin = baseUrl.replace(/\/+$/, "");
+    return (
+        `${origin}/auth/oidc-consent?agent_id=${encodeURIComponent(params.agentId)}` +
+        `&agent_uid=${encodeURIComponent(params.agentUid)}` +
+        `&audience=${encodeURIComponent(params.audience)}`
+    );
+}

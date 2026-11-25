@@ -3,6 +3,7 @@ import {
     buildDiscoveryDocument,
     getIssuerConfig,
     normalizeIssuer,
+    resetIssuerWarnings,
 } from "@/oidc/issuer";
 
 describe("normalizeIssuer", () => {
@@ -42,6 +43,15 @@ describe("normalizeIssuer", () => {
 describe("getIssuerConfig", () => {
     afterEach(() => {
         vi.restoreAllMocks();
+        resetIssuerWarnings();
+    });
+
+    it("warns once per isolate, not on every request", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        for (let i = 0; i < 3; i++) {
+            getIssuerConfig({ OIDC_ISSUER: "https://deplodash.euroka.moe" });
+        }
+        expect(warn).toHaveBeenCalledOnce();
     });
 
     it("is null and silent when the feature is not configured", () => {
@@ -74,15 +84,6 @@ describe("getIssuerConfig", () => {
     it.concurrent("is null without a signing key", () => {
         expect(
             getIssuerConfig({ OIDC_ISSUER: "https://deplodash.euroka.moe" })
-        ).toBeNull();
-    });
-
-    it.concurrent("is null with an invalid issuer", () => {
-        expect(
-            getIssuerConfig({
-                OIDC_ISSUER: "https://deplodash.euroka.moe/",
-                OIDC_SIGNING_KEY: "key",
-            })
         ).toBeNull();
     });
 

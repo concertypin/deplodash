@@ -692,4 +692,126 @@ describe("HomePage", () => {
         // No flash of enabled controls between the success and the reload.
         await expect.element(revokeControl).toBeDisabled();
     });
+
+    describe("Cloud Access (OIDC)", () => {
+        const AUDIENCE =
+            "https://iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/agents-pool/providers/deplodash";
+
+        function mockOidcDashboard(
+            onRevoke: (body: unknown) => Promise<Response>
+        ) {
+            mockFetch.mockImplementation(
+                (input: string | URL | Request, init?: RequestInit) => {
+                    const url =
+                        typeof input === "string"
+                            ? input
+                            : input instanceof URL
+                              ? input.href
+                              : input.url;
+                    if (url.includes("/api/user/me")) {
+                        return mockFetchOnce({
+                            login: "testuser",
+                            avatarUrl: "",
+                            name: null,
+                        });
+                    }
+                    if (url.includes("/api/user/oidc-consents")) {
+                        return mockFetchOnce({
+                            consents: [
+                                {
+                                    agent_id: "gcp-agent",
+                                    agent_uid: "abcdefghijklmnopqrstuv",
+                                    audience: AUDIENCE,
+                                    granted_at: "2026-11-24T00:00:00Z",
+                                },
+                            ],
+                        });
+                    }
+                    if (url.includes("/api/user/consents")) {
+                        return mockFetchOnce({ consents: [] });
+                    }
+                    if (url.includes("/api/user/agent/list")) {
+                        return mockFetchOnce({
+                            status: "ok",
+                            tokens: [
+                                {
+                                    token: "token-1234567890",
+                                    agent_id: "gcp-agent",
+                                    label: "GCP agent",
+                                    created_at: "2026-11-24T00:00:00Z",
+                                    oidc_subject:
+                                        "agent:abcdefghijklmnopqrstuv",
+                                },
+                            ],
+                        });
+                    }
+                    if (url.includes("/api/consent/oidc/revoke")) {
+                        return onRevoke(
+                            JSON.parse(
+                                typeof init?.body === "string"
+                                    ? init.body
+                                    : "null"
+                            )
+                        );
+                    }
+                    return mockFetchOnce({});
+                }
+            );
+        }
+
+        it("shows each agent's OIDC subject and the granted providers", async () => {
+            mockOidcDashboard(() => mockFetchOnce({ status: "ok" }));
+            const screen = await render(HomePage);
+
+            await expect
+                .element(screen.getByText("agent:abcdefghijklmnopqrstuv"))
+                .toBeVisible();
+            await expect
+                .element(screen.getByText(/GCP project 123456789012/))
+                .toBeVisible();
+            await expect
+                .element(screen.getByText(/agents-pool\/deplodash/))
+                .toBeVisible();
+        });
+
+        it("revokes with the uid and audience and removes the row", async () => {
+            const bodies: unknown[] = [];
+            mockOidcDashboard((body) => {
+                bodies.push(body);
+                return mockFetchOnce({ status: "ok" });
+            });
+            const screen = await render(HomePage);
+
+            await screen
+                .getByRole("button", {
+                    name: "Revoke cloud access for gcp-agent",
+                })
+                .click();
+
+            await expect
+                .element(screen.getByText("No cloud access granted yet"))
+                .toBeVisible();
+            expect(bodies).toEqual([
+                { agent_uid: "abcdefghijklmnopqrstuv", audience: AUDIENCE },
+            ]);
+        });
+
+        it("keeps the row and shows an error when revoke is forbidden", async () => {
+            mockOidcDashboard(() => mockFetchOnce({ error: "no" }, 403));
+            const screen = await render(HomePage);
+
+            await screen
+                .getByRole("button", {
+                    name: "Revoke cloud access for gcp-agent",
+                })
+                .click();
+
+            await expect
+                .element(screen.getByText("You cannot revoke this access"))
+                .toBeVisible();
+            await expect
+                .element(screen.getByText(/GCP project 123456789012/))
+                .toBeVisible();
+        });
+    });
 });

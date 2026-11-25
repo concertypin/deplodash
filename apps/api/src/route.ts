@@ -8,6 +8,7 @@ import { tokenRouter } from "@/routes/token";
 import { userRouter } from "@/routes/user";
 import { llmsRouter } from "@/routes/llms";
 import { wellKnownRouter } from "@/routes/well-known";
+import { oidcRouter } from "@/routes/oidc";
 
 /**
  * Root router that composes all sub-routers.
@@ -15,7 +16,8 @@ import { wellKnownRouter } from "@/routes/well-known";
  * Mount point hierarchy:
  *   /auth      → auth (OAuth start — /auth/github)
  *   /api       → API token (/api/token)
- *   /api/consent    → Consent API (/api/consent, /api/consent/revoke)
+ *   /api/oidc  → OIDC identity tokens (/api/oidc/token, /api/oidc/wait)
+ *   /api/consent    → Consent API (/api/consent, /api/consent/revoke, /api/consent/oidc)
  *   /llms.txt  → LLM agent documentation
  *   /.well-known → OIDC discovery + JWKS (Workload Identity Federation)
  *
@@ -42,6 +44,7 @@ export const router = new Hono<HonoEnv>()
     )
     // Routes NOT requiring session cookie
     .route("/api", tokenRouter)
+    .route("/api/oidc", oidcRouter)
     .route("/", llmsRouter);
 
 export type AppType = typeof router;

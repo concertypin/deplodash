@@ -27,7 +27,7 @@ pnpm install
 cp .dev.vars.example .dev.vars
 
 pnpm dev     # → http://localhost:5178
-pnpm test    # 211 tests
+pnpm test
 pnpm build   # → dist/
 ```
 
@@ -42,6 +42,9 @@ pnpm build   # → dist/
 | `GITHUB_APP_ID`          | ✅       | GitHub App ID                                                   |
 | `GITHUB_APP_PRIVATE_KEY` | ✅       | PEM-encoded RSA private key for the GitHub App                  |
 | `GITHUB_TOKEN`           | ❌       | Direct PAT — skips OAuth (dev/testing only)                     |
+| `OIDC_ISSUER`            | ❌       | OIDC issuer origin; enables Google Cloud access (see below)     |
+| `OIDC_SIGNING_KEY`       | ❌       | RSA PKCS#8 PEM (2048+ bits) that signs OIDC identity tokens     |
+| `OIDC_ADDITIONAL_JWKS`   | ❌       | Extra RSA public keys published during signing key rotation     |
 
 ## How It Works
 
@@ -92,6 +95,50 @@ sequenceDiagram
 
 Available scopes: `contents:read`, `contents:write`, `workflows:write`, `admin`
 
+### `POST /api/oidc/token` — Request an OIDC Identity Token
+
+```json
+// Request
+{ "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/deplodash" }
+
+// Response (200) — 10-minute ID token for Workload Identity Federation
+{ "status": "ok", "id_token": "eyJ...", "token_type": "urn:ietf:params:oauth:token-type:id_token", "expires_at": "...", "subject": "agent:<uid>" }
+
+// Response (202) — the agent's owner must approve this audience
+{ "status": "needs_consent", "url": "https://.../auth/oidc-consent?...", "subject": "agent:<uid>" }
+```
+
+## Google Cloud (Workload Identity Federation)
+
+Deplodash is an OIDC issuer, so agents can get Google Cloud credentials without a service account key. Every agent token issued from the dashboard has a stable subject `agent:<uid>`, shown under its ID on the dashboard. The uid belongs to the agent token: revoking the token retires the subject for good, even if an agent with the same ID is created again. Agent tokens created before OIDC support (no subject on the dashboard) get `409` from the OIDC endpoints; issue a new token to use them.
+
+1. Create a pool and an OIDC provider that trusts Deplodash. **Always set the attribute condition on `sub`**: the issuer is shared by every Deplodash user, so without it any Deplodash agent could use your provider. Trust only `sub` (`agent:<uid>`). `agent_id` is a name anyone can pick (two users may both have an agent called `asdf`), and `owner_github_id` is informational, so never base IAM bindings or conditions on either.
+
+   ```sh
+   gcloud iam workload-identity-pools create agents-pool --location=global
+   gcloud iam workload-identity-pools providers create-oidc deplodash \
+     --location=global --workload-identity-pool=agents-pool \
+     --issuer-uri=https://deplodash.euroka.moe \
+     --attribute-mapping="google.subject=assertion.sub" \
+     --attribute-condition="assertion.sub == 'agent:<uid>'"
+   ```
+
+2. Grant access to the agent's principal, either directly on resources or by letting it impersonate a service account:
+
+   ```sh
+   gcloud iam service-accounts add-iam-policy-binding <sa-email> \
+     --role=roles/iam.workloadIdentityUser \
+     --member="principal://iam.googleapis.com/projects/<project-number>/locations/global/workloadIdentityPools/agents-pool/subject/agent:<uid>"
+   ```
+
+3. The agent calls `POST /api/oidc/token` with the provider as `audience`. The first request returns a consent URL; approve it while signed in as the agent's owner (only the owner can). Approvals are listed under **Cloud Access (OIDC)** on the dashboard and can be revoked there. Revoking stops new identity tokens, after up to about a minute while other Cloudflare locations still serve the cached consent. Tokens already issued stay valid until they expire (10 minutes), and Google credentials already exchanged from them follow Google's own lifetime (one hour by default), so also remove the IAM binding when you need to cut access at once.
+
+4. The agent exchanges the ID token at `https://sts.googleapis.com/v1/token`. `/llms.txt` has the exact request.
+
+The token's `aud` is the audience exactly as the agent requested it. With no `--allowed-audiences` set (as above), Google accepts both the `https://iam.googleapis.com/...` and `//iam.googleapis.com/...` spellings. If you set `--allowed-audiences`, the agent must request one of those values verbatim, and only the provider resource name forms are supported.
+
+Before production rollout you can test the exchange against a provider created with `--jwk-json-path` (the contents of `/.well-known/jwks.json`) so Google does not need to reach the issuer.
+
 ## Git Credential Helper
 
 For HTTPS `git push`, install the credential helper (Node 24 and Git 2.26 or newer) with one command:
@@ -110,8 +157,8 @@ Only needed for the consent page authentication:
 
 1. **GitHub** → Settings → Developer settings → OAuth Apps → **New OAuth App**
 2. Set **Authorization callback URL** to your app's `/callback`
-    - Local: `http://localhost:5178/callback`
-    - Production: `https://your-worker.workers.dev/callback`
+   - Local: `http://localhost:5178/callback`
+   - Production: `https://your-worker.workers.dev/callback`
 3. Copy the Client ID and Client Secret to `.dev.vars`
 
 ## Architecture

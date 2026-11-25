@@ -3,20 +3,28 @@
  *
  * POST /api/consent          — grant consent for an agent
  * POST /api/consent/revoke   — revoke consent for an agent
+ * POST /api/consent/oidc        — let an agent mint OIDC tokens for an audience
+ * POST /api/consent/oidc/revoke — withdraw that permission
+ * GET  /api/consent/oidc/agent   — the signed-in user's agent for a uid (consent page)
  *
  * Both endpoints require a valid session cookie and return JSON.
  */
 
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { validator } from "hono-openapi";
 import * as z from "zod";
-import type { HonoEnv } from "@/types";
+import type { AgentInfo, GitHubUser, HonoEnv } from "@/types";
+import type { ParsedAudience } from "@/oidc/audience";
 import type { GitHubClient } from "@/github";
 import { authGuard } from "@/middleware";
 import { TokenService } from "@/token/service";
 import { ConsentOwnershipError } from "@/errors";
 import { notifyWaiters } from "@/token/wait-notifier";
 import { APPROVABLE_SCOPES, expandCompoundScopes } from "@/github/scopes";
+import { isRateLimited } from "@/rate-limit";
+import { findAgentByUid, isOidcOwner } from "@/middleware/agent-auth";
+import { parseAudience } from "@/oidc/audience";
+import { OidcConsentService, oidcWaiterKey } from "@/oidc/consent";
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +47,17 @@ const revokeSchema = z.object({
     scopes: z.string().min(1),
     agent_id: z.string().min(1).optional(),
 });
+
+const agentUidSchema = z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{22}$/, "Invalid agent uid");
+
+const oidcConsentSchema = z.object({
+    agent_uid: agentUidSchema,
+    audience: z.string().min(1).max(512),
+});
+
+const oidcAgentQuerySchema = z.object({ agent_uid: agentUidSchema });
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 // Mounted at /api/consent — relative paths
@@ -78,20 +97,13 @@ export const consentRouter = new Hono<HonoEnv>()
             return c.json({ error: "CSRF detected" }, 403);
         }
 
-        const consentRateLimiter = c.env.TOKEN_RATE_LIMITER;
-        if (consentRateLimiter) {
-            try {
-                const { success } = await consentRateLimiter.limit({
-                    key: c.req.header("CF-Connecting-IP") || "unknown",
-                });
-                if (!success)
-                    return c.json(
-                        { error: "Rate limited. Try again later." },
-                        429
-                    );
-            } catch {
-                // Rate limiter unavailable — proceed.
-            }
+        if (
+            await isRateLimited(
+                c.env.TOKEN_RATE_LIMITER,
+                `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
+            )
+        ) {
+            return c.json({ error: "Rate limited. Try again later." }, 429);
         }
 
         try {
@@ -223,21 +235,13 @@ export const consentRouter = new Hono<HonoEnv>()
                 return c.json({ error: "CSRF detected" }, 403);
             }
             // Rate limiting — per-IP throttle for consent endpoints
-            const revokeRateLimiter = c.env.TOKEN_RATE_LIMITER;
-            if (revokeRateLimiter) {
-                try {
-                    const { success } = await revokeRateLimiter.limit({
-                        key: c.req.header("CF-Connecting-IP") || "unknown",
-                    });
-                    if (!success) {
-                        return c.json(
-                            { error: "Rate limited. Try again later." },
-                            429
-                        );
-                    }
-                } catch {
-                    // Rate limiter unavailable (e.g., local dev) — proceed
-                }
+            if (
+                await isRateLimited(
+                    c.env.TOKEN_RATE_LIMITER,
+                    `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
+                )
+            ) {
+                return c.json({ error: "Rate limited. Try again later." }, 429);
             }
             const client = c.get("client")!;
             const tokenService = new TokenService(c.env.KV);
@@ -282,4 +286,134 @@ export const consentRouter = new Hono<HonoEnv>()
                 return c.json({ error: "Failed to revoke consent" }, 500);
             }
         }
+    )
+    .post(
+        "/oidc",
+        authGuard(),
+        validator("json", oidcConsentSchema),
+        async (c) => {
+            const guard = await guardOidcConsentRequest(c);
+            if (guard instanceof Response) return guard;
+            const { agent, audience, user } = guard;
+
+            const agentUid = agent.info.uid!;
+            try {
+                await new OidcConsentService(c.env.KV).grant({
+                    agentId: agent.info.agent_id,
+                    agentUid,
+                    audience,
+                    grantedBy: user.login,
+                });
+            } catch (err: unknown) {
+                console.error("consent: failed to grant OIDC consent", err);
+                return c.json({ error: "Failed to grant consent" }, 500);
+            }
+            notifyWaiters(oidcWaiterKey(audience.audience), agentUid);
+            return c.json({ status: "ok" });
+        }
+    )
+    .post(
+        "/oidc/revoke",
+        authGuard(),
+        validator("json", oidcConsentSchema),
+        async (c) => {
+            const guard = await guardOidcConsentRequest(c);
+            if (guard instanceof Response) return guard;
+            try {
+                await new OidcConsentService(c.env.KV).revoke(
+                    guard.agent.info.uid!,
+                    guard.audience.audience
+                );
+            } catch (err: unknown) {
+                console.error("consent: failed to revoke OIDC consent", err);
+                return c.json({ error: "Failed to revoke consent" }, 500);
+            }
+            return c.json({ status: "ok" });
+        }
+    )
+    .get(
+        "/oidc/agent",
+        authGuard(),
+        validator("query", oidcAgentQuerySchema),
+        async (c) => {
+            // A direct uid lookup: the consent page must not depend on the
+            // eventually consistent, full-scan agent list.
+            const owned = await resolveOwnedOidcAgent(
+                c,
+                c.req.valid("query").agent_uid
+            );
+            if (owned instanceof Response) return owned;
+            const { info } = owned.agent;
+            return c.json({ agent_id: info.agent_id, label: info.label });
+        }
     );
+
+const NOT_OWNER = {
+    error: "Only the agent's owner can change its OIDC access",
+};
+
+/**
+ * Resolve `agentUid` to an agent the signed-in user may manage OIDC access
+ * for. Unknown and foreign uids get the same 403, so uids of other users'
+ * agents cannot be probed.
+ */
+async function resolveOwnedOidcAgent(
+    c: Context<HonoEnv>,
+    agentUid: string
+): Promise<
+    Response | { agent: { token: string; info: AgentInfo }; user: GitHubUser }
+> {
+    let user: GitHubUser;
+    try {
+        user = await c.get("client")!.getUser();
+    } catch {
+        return c.json(
+            { error: "Failed to verify identity. Please try again." },
+            401
+        );
+    }
+    const agent = await findAgentByUid(c.env.KV, agentUid);
+    if (!agent || !isOidcOwner(agent.info, user)) return c.json(NOT_OWNER, 403);
+    return { agent, user };
+}
+
+/**
+ * Shared checks for OIDC consent changes: same-origin, rate limit, a
+ * supported audience, and — the security boundary — that the signed-in user
+ * owns the agent. Only the owner can let their agent assume cloud
+ * identities; Deplodash cannot verify who administers the relying party.
+ */
+async function guardOidcConsentRequest(
+    c: Context<
+        HonoEnv,
+        string,
+        { out: { json: z.infer<typeof oidcConsentSchema> } }
+    >
+): Promise<
+    | Response
+    | {
+          agent: { token: string; info: AgentInfo };
+          audience: ParsedAudience;
+          user: GitHubUser;
+      }
+> {
+    const origin = c.req.header("Origin");
+    if (origin && origin !== new URL(c.req.url).origin) {
+        return c.json({ error: "CSRF detected" }, 403);
+    }
+    if (
+        await isRateLimited(
+            c.env.TOKEN_RATE_LIMITER,
+            `ip:${c.req.header("CF-Connecting-IP") || "unknown"}`
+        )
+    ) {
+        return c.json({ error: "Rate limited. Try again later." }, 429);
+    }
+    const { agent_uid, audience: rawAudience } = c.req.valid("json");
+    const audience = parseAudience(rawAudience);
+    if (!audience) return c.json({ error: "Unsupported audience" }, 400);
+
+    const owned = await resolveOwnedOidcAgent(c, agent_uid);
+    if (owned instanceof Response) return owned;
+    return { ...owned, audience };
+}

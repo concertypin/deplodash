@@ -3,6 +3,7 @@
     import { GithubLogoIcon } from "phosphor-svelte";
     import { client } from "@/lib/api";
     import { reloadPage } from "@/lib/router.svelte";
+    import { describeGcpAudience } from "@/lib/oidc";
     interface ConsentItem {
         repo: string;
         scopes: string;
@@ -88,6 +89,14 @@
         agent_id: string;
         label: string;
         created_at: string;
+        oidc_subject?: string | undefined;
+    }
+
+    interface OidcConsentItem {
+        agent_id: string;
+        agent_uid: string;
+        audience: string;
+        granted_at: string;
     }
 
     interface UserProfile {
@@ -112,6 +121,16 @@
             ? (await consentsRes.json()).consents
             : [];
 
+        // OIDC access is optional: a failure here must not hide the dashboard.
+        try {
+            const oidcRes = await client.api.user["oidc-consents"].$get();
+            oidcConsentItems = oidcRes.ok
+                ? ((await oidcRes.json()).consents ?? [])
+                : [];
+        } catch {
+            oidcConsentItems = [];
+        }
+
         const agentTokensRes = await client.api.user.agent.list.$get();
         const agentTokens: AgentToken[] = agentTokensRes.ok
             ? (await agentTokensRes.json()).tokens
@@ -120,6 +139,34 @@
         return { kind: "dashboard", data: { user, agentTokens } };
     }
     let consentItems = $state<ConsentItem[]>([]);
+    let oidcConsentItems = $state<OidcConsentItem[]>([]);
+    let revokingOidc = $state(false);
+
+    async function revokeOidcConsent(item: OidcConsentItem) {
+        if (revokingOidc) return;
+        revokingOidc = true;
+        error = null;
+        try {
+            const res = await client.api.consent.oidc.revoke.$post({
+                json: { agent_uid: item.agent_uid, audience: item.audience },
+            });
+            if (res.ok) {
+                oidcConsentItems = oidcConsentItems.filter(
+                    (other) =>
+                        other.agent_uid !== item.agent_uid ||
+                        other.audience !== item.audience
+                );
+            } else {
+                error =
+                    res.status === 403
+                        ? "You cannot revoke this access"
+                        : "Failed to revoke access";
+            }
+        } catch (e) {
+            error = e instanceof Error ? e.message : "Failed to revoke access";
+        }
+        revokingOidc = false;
+    }
     const consentGroups = $derived(groupConsents(consentItems));
     let error = $state<string | null>(null);
 
@@ -407,9 +454,19 @@
                                 <tbody>
                                     {#each agentTokens as token (token.token)}
                                         <tr>
-                                            <td class="font-semibold"
-                                                >{token.agent_id}</td
-                                            >
+                                            <td>
+                                                <div class="font-semibold">
+                                                    {token.agent_id}
+                                                </div>
+                                                {#if token.oidc_subject}
+                                                    <div
+                                                        class="font-mono text-xs text-base-content/60"
+                                                        title="OIDC subject (sub): pin it in your Workload Identity provider's attribute condition"
+                                                    >
+                                                        {token.oidc_subject}
+                                                    </div>
+                                                {/if}
+                                            </td>
                                             <td>{token.label}</td>
                                             <td class="font-mono text-xs">
                                                 <div
@@ -624,6 +681,76 @@
                                                         )}
                                                     aria-label={`Revoke access to ${group.repo}`}
                                                     disabled={revokingConsent}
+                                                    class="text-error hover:text-error/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    Revoke
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- OIDC (Workload Identity Federation) access -->
+                <div
+                    class="bg-base-100 rounded-box shadow-sm border border-base-200 p-6 mt-8"
+                >
+                    <h3 class="text-lg font-semibold text-base-content mb-4">
+                        Cloud Access (OIDC)
+                    </h3>
+                    {#if oidcConsentItems.length === 0}
+                        <div class="text-center py-8 text-base-content/60">
+                            <p class="text-lg mb-2">No cloud access granted yet</p>
+                            <p class="text-sm">
+                                Approve when an agent requests identity tokens
+                                for a Workload Identity provider.
+                            </p>
+                        </div>
+                    {:else}
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Agent</th>
+                                        <th>Provider</th>
+                                        <th>Granted</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {#each oidcConsentItems as item (item.agent_uid + "|" + item.audience)}
+                                        {@const gcp = describeGcpAudience(
+                                            item.audience
+                                        )}
+                                        <tr>
+                                            <td class="font-medium"
+                                                >{item.agent_id}</td
+                                            >
+                                            <td class="text-sm">
+                                                {#if gcp}
+                                                    GCP project {gcp.projectNumber}
+                                                    · {gcp.poolId}/{gcp.providerId}
+                                                {:else}
+                                                    <span
+                                                        class="font-mono break-all"
+                                                        >{item.audience}</span
+                                                    >
+                                                {/if}
+                                            </td>
+                                            <td>
+                                                {new Date(
+                                                    item.granted_at
+                                                ).toLocaleDateString()}
+                                            </td>
+                                            <td class="text-right">
+                                                <button
+                                                    onclick={() =>
+                                                        revokeOidcConsent(item)}
+                                                    aria-label={`Revoke cloud access for ${item.agent_id}`}
+                                                    disabled={revokingOidc}
                                                     class="text-error hover:text-error/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     Revoke
